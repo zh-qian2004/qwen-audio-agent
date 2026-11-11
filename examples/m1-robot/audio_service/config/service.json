@@ -1,0 +1,131 @@
+{
+  "service": {
+    "host": "127.0.0.1",
+    "port": 8091,
+    "log_level": "info",
+    "log_max_bytes": 5242880,
+    "log_backup_count": 3
+  },
+  "tts": {
+    "model": "qwen-audio-3.1-tts-flash",
+    "voice": "longanhuan_v3.1",
+    "voices": [
+      {"id": "longanhuan_v3.1", "label": "龙安欢 · 活泼女声"},
+      {"id": "longanlingxin_v3.1", "label": "龙安灵心 · 温柔女声"},
+      {"id": "longanfengyue_v3.1", "label": "龙安风悦 · 自然女声"},
+      {"id": "xunanchuan_v3.1", "label": "许南川 · 沉稳男声"},
+      {"id": "yuxiaoyun_v3.1", "label": "于小云 · 元气亲切女声"},
+      {"id": "qiaoxiaojiao_v3.1", "label": "乔小娇 · 俏丽可爱女声"},
+      {"id": "anmingyuan_v3.1", "label": "安明远 · 清亮自然男声"},
+      {"id": "wenhuaiqing_v3.1", "label": "温怀清 · 清亮柔和女声"},
+      {"id": "baianran_v3.1", "label": "白安然 · 低沉浑厚女声"},
+      {"id": "xuyanchu_v3.1", "label": "许言初 · 沉稳磁性女声"}
+    ],
+    "emotions": [
+      {"id": "neutral", "label": "自然"},
+      {"id": "excited", "label": "兴奋"},
+      {"id": "serious", "label": "严肃"},
+      {"id": "empathetic", "label": "共情"},
+      {"id": "curious", "label": "好奇"},
+      {"id": "mischievously", "label": "调皮"},
+      {"id": "whispers", "label": "耳语"},
+      {"id": "sad", "label": "悲伤"}
+    ],
+    "default_emotion": "neutral",
+    "speech_rate": {"default": 1.0, "min": 0.5, "max": 2.0, "step": 0.05},
+    "base_websocket_api_url": "wss://llm-bxl8z8toxw4sq5z5.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference",
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "max_text_length": 300,
+    "synthesis_timeout_seconds": 30,
+    "decode_timeout_seconds": 30,
+    "idempotency_ttl_seconds": 600
+  },
+  "queue": {
+    "capacity": 8,
+    "publish_timeout_seconds": 180,
+    "playback_drain_seconds": 0.4
+  },
+  "playback": {
+    "priorities": {
+      "tts_normal": 10,
+      "realtime": 20,
+      "tts_high": 30
+    },
+    "acquire_timeout_seconds": 180,
+    "recent_events": 20
+  },
+  "output": {
+    "start_timeout_seconds": 5,
+    "idle_timeout_seconds": 5,
+    "max_stream_seconds": 300,
+    "buffer_limit_bytes": 384000,
+    "chunk_ms": 60,
+    "publish_lead_chunks": 2,
+    "playback_drain_seconds": 0.4,
+    "recent_events": 20
+  },
+  "audio": {
+    "sample_rate": 48000,
+    "channels": 2,
+    "sample_width": 2,
+    "chunk_ms": 60,
+    "ffmpeg_path": "ffmpeg",
+    "ffprobe_path": "ffprobe",
+    "clean_child_env": true,
+    "publish_lead_chunks": 2
+  },
+  "ros": {
+    "node_name": "audio_service_publisher",
+    "runtime_node_name": "audio_service",
+    "executor_threads": 2,
+    "speaker_topic": "/audio/speaker_pcm",
+    "speaker_status_topic": "/audio/speaker_pcm_status",
+    "capture_topic": "/audio/capture_pcm",
+    "encoding": "pcm_48000_16_2",
+    "qos_depth": 10,
+    "capture_window_seconds": 3.0
+  },
+  "input": {
+    "topic": "/audio/capture_pcm",
+    "encoding": "pcm_16000_16_1",
+    "sample_rate": 16000,
+    "channels": 1,
+    "sample_width": 2,
+    "input_qos_depth": 100,
+    "frame_ms": 20,
+    "ring_buffer_ms": 5000,
+    "ingress_capacity": 32,
+    "level_update_hz": 10,
+    "level_history_seconds": 60,
+    "consumer_capacity": 100,
+    "stream_capacity": 50,
+    "pre_roll_max_ms": 5000,
+    "stale_after_seconds": 1.0,
+    "source_label": "厂商 media_audio 处理后麦克风流",
+    "mock_sessions": []
+  },
+  "media_audio": {
+    "process_name": "media_audio"
+  },
+  "media_audio_bridge": {
+    "enabled": true,
+    "domain_id": 43,
+    "node_name": "audio_service_media_bridge",
+    "executor_threads": 2,
+    "qos_depth": 100
+  },
+  "vendor_events": {
+    "enabled": true,
+    "routing_required": true,
+    "input_topic": "/audio/speaker_pcm_interrupt",
+    "playback_topic": "/audio/speaker_pcm_interrupt",
+    "speaker_status_topic": "/audio/speaker_pcm_status",
+    "decision_timeout_seconds": 1.5,
+    "agent_stale_seconds": 5.0,
+    "qos_depth": 10,
+    "history_size": 50
+  },
+  "history": {
+    "max_items": 50
+  }
+}

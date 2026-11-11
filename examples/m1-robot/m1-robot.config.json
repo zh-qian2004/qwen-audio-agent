@@ -1,0 +1,43 @@
+{
+  "ssh": {
+    "enabled": true,
+    "executable": "ssh",
+    "target": "root@192.168.137.228",
+    "identityFile": "",
+    "knownHostsFile": "",
+    "connectTimeoutSeconds": 10,
+    "forwards": [
+      {
+        "localPort": 18091,
+        "remoteHost": "127.0.0.1",
+        "remotePort": 8091
+      },
+      {
+        "localPort": 18080,
+        "remoteHost": "127.0.0.1",
+        "remotePort": 8080
+      }
+    ]
+  },
+  "gateway": {
+    "startLocal": true,
+    "buildBeforeStart": true,
+    "reuseExisting": true,
+    "url": "ws://127.0.0.1:18888/api/realtime",
+    "accessToken": "",
+    "frontendProfile": "./profile/frontend-profile.json",
+    "readyTimeoutMs": 120000,
+    "environment": {}
+  },
+  "connector": {
+    "audioServiceOrigin": "http://127.0.0.1:18091",
+    "dashboardUrl": "http://127.0.0.1:18080",
+    "halfDuplex": false,
+    "clientInstanceId": "m1-robot-primary",
+    "clientLabel": "M1 Robot",
+    "locale": "zh-CN",
+    "timeZone": "Asia/Shanghai",
+    "preflightTimeoutMs": 20000,
+    "environment": {}
+  }
+}

@@ -218,12 +218,13 @@ npm run desktop:build:linux      # Linux（AppImage + deb，无需签名）
 | X-Omni | 视觉对话、按需采集、可选画面观察与解说。 | [示例](https://github.com/QwenAudio/qwen-audio-agent/tree/main/examples/x-omni/README_ZH.md) | 已提供 |
 | AI Passport | 在硬件卡片上运行千问语音豆，进行语音对话与后台任务交互；目前仅开放半双工。 | [示例][ai-passport-example] | 已提供 |
 | 客服助手 | 零售与航空场景的语音客服。 | [示例](https://github.com/QwenAudio/qwen-audio-agent/tree/main/examples/customer-service/README_ZH.md) | 已提供 |
-| 具身智能 | 语音指令、动作执行、巡检和异常反馈。 | 待补充 | 规划中 |
+| Zeroth M1 机器人 | 实时语音、状态 Dashboard、视觉检测以及带安全门控的运动控制。 | [示例][m1-robot-example-zh] | `feat/m1-robot` 分支已提供 |
 | 直播助手 | 弹幕互动、商品讲解、优惠发放和风险提醒。 | 待补充 | 规划中 |
 
 [desktop-docs-zh]: docs/desktop/overview.zh.md
 [smart-cockpit-example]: examples/smart-cockpit
 [ai-passport-example]: examples/ai-passport/README_ZH.md
+[m1-robot-example-zh]: examples/m1-robot/README_ZH.md
 
 ## 交流与分享
 

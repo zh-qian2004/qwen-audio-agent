@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "name": "m1-robot",
+  "description": "Zeroth M1 机器人实时语音与动作控制前台",
+  "assistant": "ASSISTANT.md"
+}

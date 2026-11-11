@@ -1,0 +1,30 @@
+{
+  "service": {
+    "host": "127.0.0.1",
+    "port": 8092,
+    "version": "0.1.0",
+    "history_size": 100,
+    "result_stale_after_seconds": 1.5
+  },
+  "ros": {
+    "node_name": "vision_service",
+    "executor_threads": 2
+  },
+  "processors": {
+    "object_detection": {
+      "enabled": true,
+      "auto_start": false,
+      "source": "vendor_multitask",
+      "result_topic": "/vision/multitask_result",
+      "enable_topic": "/vision/multitask_detect_flag",
+      "manage_source_enable": true,
+      "enable_publish_repeats": 3,
+      "enable_publish_interval_seconds": 0.1,
+      "probe_existing_stream_seconds": 0.75,
+      "confidence_threshold": 0.5,
+      "source_stale_after_seconds": 1.0,
+      "warmup_seconds": 3.0,
+      "model": "multitask_body_head_face_hand_kps_960x544.hbm"
+    }
+  }
+}

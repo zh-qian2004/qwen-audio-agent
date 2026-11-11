@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>ZEROTH 机器人 Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/system-metrics.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="brand">
+        <span class="brand-mark">M1</span>
+        <div><h1>ZEROTH <span>机器人 Dashboard</span></h1><p>REAL-TIME ROBOT TELEMETRY</p></div>
+      </div>
+      <div class="header-status">
+        <span id="ws-pill" class="status-pill warn"><i></i><span>正在连接</span></span>
+      </div>
+    </div>
+    <nav class="view-tabs" id="view-tabs" aria-label="页面导航">
+      <button class="tab active" data-view="overview">总览</button>
+      <button class="tab" data-view="motion">运动控制</button>
+      <button class="tab" data-view="joints">关节状态</button>
+      <button class="tab" data-view="imu-section">姿态与 IMU</button>
+      <button class="tab" data-view="power">电池与底盘</button>
+      <button class="tab" data-view="media">音视频流</button>
+      <button class="tab" data-view="audio-services">Audio Service</button>
+      <button class="tab" data-view="video-services">Video Service</button>
+      <button class="tab" data-view="sensors">传感器健康</button>
+      <button class="tab" data-view="ros-graph">ROS 2 图</button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="section view active" id="overview">
+      <div class="section-heading"><div><span class="eyebrow">01 / OVERVIEW</span><h2>运行总览</h2></div><div class="last-update">ROS 最后更新 <strong id="last-update">无数据</strong></div></div>
+      <div class="overview-grid">
+        <article class="card connection-card">
+          <div class="card-label">DASHBOARD / ROS 2</div>
+          <div class="connection-line"><span id="ros-dot" class="big-dot"></span><strong id="ros-status">启动中</strong></div>
+          <dl class="compact-list">
+            <div><dt>固件</dt><dd id="firmware">—</dd></div>
+            <div><dt>主机</dt><dd id="hostname">—</dd></div>
+            <div><dt>IP</dt><dd id="ip-address">—</dd></div>
+            <div><dt>运行时间</dt><dd id="uptime">—</dd></div>
+            <div><dt>根文件系统</dt><dd id="root-mount">—</dd></div>
+          </dl>
+        </article>
+        <article class="card metric-card"><div class="card-label">CPU 使用率</div><strong class="metric" id="cpu">—</strong><span class="metric-unit" id="load">LOAD —</span><div class="meter"><i id="cpu-bar"></i></div></article>
+        <article class="card metric-card"><div class="card-label">BPU 使用率</div><strong class="metric" id="bpu">—</strong><span class="metric-unit" id="bpu-detail">检测硬件不可用</span><div class="meter"><i id="bpu-bar"></i></div></article>
+        <article class="card metric-card"><div class="card-label">内存</div><strong class="metric" id="memory">—</strong><span class="metric-unit" id="memory-detail">—</span><div class="meter"><i id="memory-bar"></i></div></article>
+        <article class="card metric-card"><div class="card-label">/userdata 磁盘</div><strong class="metric" id="disk">—</strong><span class="metric-unit" id="disk-detail">—</span><div class="meter"><i id="disk-bar"></i></div></article>
+        <article class="card metric-card"><div class="card-label">温度</div><strong class="metric" id="temperature">—</strong><span class="metric-unit" id="temperature-detail">—</span><div class="temp-line"><span>服务占用</span><b id="service-usage">—</b></div></article>
+      </div>
+    </section>
+
+    <section class="section view" id="motion">
+      <div class="section-heading">
+        <div><span class="eyebrow">MOTION / CONTROL</span><h2>运动控制</h2></div>
+        <div class="section-note">厂商 HTTP 受理 ≠ 运动完成 · 以 ROS 步态与底盘反馈为准</div>
+      </div>
+
+      <div class="motion-stopbar" id="motion-stopbar">
+        <div class="motion-stopbar-copy">
+          <span class="stopbar-label">SAFETY / STOP</span>
+          <strong id="motion-stopbar-text">厂商服务检测中</strong>
+          <small>MOTION_STOP 独立高优先级路径 · 方向键按住执行，松手自动停止</small>
+        </div>
+        <div class="motion-stopbar-actions">
+          <button class="btn-stop" id="motion-stop-button" type="button">停止 MOTION_STOP</button>
+          <button class="btn-emergency" id="motion-emergency-button" type="button">紧急停止</button>
+          <button class="btn-reset" id="motion-reset-button" type="button">解除急停</button>
+        </div>
+      </div>
+
+      <div class="motion-status-grid">
+        <article class="card motion-vendor-card">
+          <div class="card-label">厂商控制服务 <span id="motion-vendor-pill" class="status-pill warn"><i></i><span>检测中</span></span></div>
+          <dl class="compact-list">
+            <div><dt>服务地址</dt><dd>127.0.0.1:12321</dd></div>
+            <div><dt>电池回读</dt><dd id="motion-vendor-battery">—</dd></div>
+            <div><dt>探测延迟</dt><dd id="motion-vendor-latency">—</dd></div>
+            <div><dt>急停状态</dt><dd id="motion-emergency-state">—</dd></div>
+          </dl>
+        </article>
+        <article class="card motion-lifecycle-card">
+          <div class="card-label">当前命令生命周期</div>
+          <div class="motion-phase-line">
+            <strong id="motion-phase">空闲</strong>
+            <span id="motion-phase-detail">尚未发送命令</span>
+          </div>
+          <div class="motion-stepper" id="motion-stepper"></div>
+          <dl class="compact-list horizontal motion-http-list">
+            <div><dt>HTTP</dt><dd id="motion-http">—</dd></div>
+            <div><dt>ROS 观测</dt><dd id="motion-observed">—</dd></div>
+            <div><dt>请求 ID</dt><dd id="motion-request-id">—</dd></div>
+          </dl>
+        </article>
+      </div>
+
+      <div class="motion-main-grid">
+        <article class="card motion-direction-card">
+          <div class="card-label">方向与旋转 <span class="inline-status">按住执行 · 松开停止</span></div>
+          <div class="dpad" id="motion-dpad">
+            <button class="dpad-button" type="button" data-hold="rotate_left" data-command-id="rotate_left"><span>↺</span><small>左转</small></button>
+            <button class="dpad-button dpad-forward" type="button" data-hold="move_forward" data-command-id="move_forward"><span>↑</span><small>前进</small></button>
+            <button class="dpad-button" type="button" data-hold="rotate_right" data-command-id="rotate_right"><span>↻</span><small>右转</small></button>
+            <button class="dpad-button" type="button" data-hold="strafe_left" data-command-id="strafe_left"><span>←</span><small>左移</small></button>
+            <button class="dpad-button dpad-stop" type="button" id="motion-dpad-stop"><span>■</span><small>停止</small></button>
+            <button class="dpad-button" type="button" data-hold="strafe_right" data-command-id="strafe_right"><span>→</span><small>右移</small></button>
+            <span class="dpad-spacer"></span>
+            <button class="dpad-button dpad-backward" type="button" data-hold="move_backward" data-command-id="move_backward"><span>↓</span><small>后退</small></button>
+            <span class="dpad-spacer"></span>
+          </div>
+          <div class="dpad-hint">按住超过命令超时（默认 5 秒）后端会自动发送 MOTION_STOP。</div>
+        </article>
+        <article class="card motion-actions-card">
+          <div class="card-label">身体 / 头部 / 业务动作</div>
+          <div id="motion-action-groups" class="motion-action-groups"><p class="empty-note">正在加载命令目录…</p></div>
+        </article>
+      </div>
+
+      <div class="motion-bottom-grid">
+        <article class="card motion-robot-card">
+          <div class="card-label">机器人与底盘反馈 <span id="motion-feedback-age" class="inline-status">无数据</span></div>
+          <div class="motion-robot-grid">
+            <div><span>控制模式</span><strong id="motion-control-mode">—</strong></div>
+            <div><span>步态</span><strong id="motion-gait-type">—</strong></div>
+            <div><span>跌倒状态</span><strong id="motion-fall-state">—</strong></div>
+            <div><span>左轮速</span><strong id="motion-left-speed">—</strong><small>MCU raw</small></div>
+            <div><span>右轮速</span><strong id="motion-right-speed">—</strong><small>MCU raw</small></div>
+            <div><span>X 线速度</span><strong id="motion-linear-velocity">—</strong><small>运动反馈</small></div>
+            <div><span>Z 角速度</span><strong id="motion-angular-rate">—</strong><small>运动反馈</small></div>
+            <div><span>头部 YAW / PITCH</span><strong id="motion-head">—</strong><small>°</small></div>
+          </div>
+          <div class="imu-meta">运动反馈年龄 <b id="motion-feedback-detail">—</b> · 底盘反馈 <b id="motion-vehicle-detail">—</b> · 跌倒反馈 <b id="motion-fall-detail">—</b></div>
+        </article>
+        <article class="card motion-timeline-card">
+          <div class="card-label">请求 / 响应 / ROS 时间线 <span id="motion-timeline-status" class="inline-status">待机</span></div>
+          <div id="motion-timeline" class="motion-timeline"><p class="empty-note">暂无运动命令</p></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section view" id="joints">
+      <div class="section-heading"><div><span class="eyebrow">02 / PROPRIOCEPTION</span><h2>关节状态</h2></div><div class="section-note">20 路本体反馈 · 角度 ° · 速度 MCU 原始值 · 60 秒曲线</div></div>
+      <div id="joint-groups" class="joint-groups"></div>
+    </section>
+
+    <section class="section view" id="imu-section">
+      <div class="section-heading"><div><span class="eyebrow">03 / ATTITUDE</span><h2>姿态与 IMU</h2></div><div id="imu-topic-status" class="topic-status">无数据</div></div>
+      <div class="imu-layout">
+        <article class="card attitude-card">
+          <canvas id="attitude-canvas" width="420" height="280" aria-label="姿态可视化"></canvas>
+          <div class="euler-grid">
+            <div><span>ROLL</span><strong id="roll">—</strong><small>°</small></div>
+            <div><span>PITCH</span><strong id="pitch">—</strong><small>°</small></div>
+            <div><span>YAW</span><strong id="yaw">—</strong><small>°</small></div>
+          </div>
+        </article>
+        <article class="card imu-data-card">
+          <div class="vector-heading"><span>角速度</span><small>rad/s</small></div>
+          <div class="vector-grid" id="angular-velocity"></div>
+          <div class="vector-heading"><span>线加速度</span><small>m/s²</small></div>
+          <div class="vector-grid" id="linear-acceleration"></div>
+          <div class="imu-meta">坐标系 <b id="imu-frame">—</b> · 使用 100 Hz Std 话题，服务端降采样至 10 Hz</div>
+        </article>
+        <article class="card chart-card wide-chart"><div class="card-label">姿态曲线 / 最近 60 秒</div><canvas id="imu-chart" width="760" height="280"></canvas><div class="legend"><span class="roll">Roll</span><span class="pitch">Pitch</span><span class="yaw">Yaw</span></div></article>
+      </div>
+    </section>
+
+    <section class="section view" id="power">
+      <div class="section-heading"><div><span class="eyebrow">04 / POWER & CHASSIS</span><h2>电池与底盘</h2></div></div>
+      <div class="power-layout">
+        <article class="card battery-card">
+          <div id="battery-ring" class="battery-ring"><div><strong id="battery-power">—</strong><span>SOC</span></div></div>
+          <div class="battery-details">
+            <div><span>电池电压</span><strong id="battery-voltage">—</strong></div>
+            <div><span>充电状态</span><strong id="charging-status">无数据</strong></div>
+            <div><span>底板电压</span><strong id="plate-voltage">—</strong></div>
+            <div><span>电流 / 温度</span><strong id="battery-extra">—</strong></div>
+          </div>
+        </article>
+        <article class="card chassis-card">
+          <div class="card-label">小车运动反馈 <span id="vehicle-status" class="inline-status">无数据</span></div>
+          <div class="vehicle-summary">
+            <div><span>反馈链路</span><strong id="vehicle-link">—</strong></div>
+            <div><span>车轮状态</span><strong id="vehicle-motion">—</strong></div>
+            <div><span>在车状态</span><strong id="vehicle-mount">未知</strong></div>
+          </div>
+          <div class="vehicle-mount-note" id="vehicle-mount-note">反馈消息未提供机器人是否在小车上的明确字段</div>
+          <div class="wheel-grid">
+            <div><span>左轮速度</span><strong id="left-speed">—</strong><small>MCU raw</small></div>
+            <div><span>右轮速度</span><strong id="right-speed">—</strong><small>MCU raw</small></div>
+            <div><span>左轮里程</span><strong id="left-mileage">—</strong><small>MCU raw</small></div>
+            <div><span>右轮里程</span><strong id="right-mileage">—</strong><small>MCU raw</small></div>
+          </div>
+          <dl class="compact-list horizontal"><div><dt>通信原始值</dt><dd id="vehicle-comm">—</dd></div><div><dt>故障码 L / R</dt><dd id="vehicle-fault">—</dd></div><div><dt>电流 L / R</dt><dd id="vehicle-current">—</dd></div></dl>
+        </article>
+      </div>
+      <article class="card battery-chart-card">
+        <div class="battery-chart-heading">
+          <div><div class="card-label">电量曲线 / 最近 6 小时</div><strong id="charge-rate">充电速度采样中</strong></div>
+          <div class="battery-estimates">
+            <div><span>本段样本</span><strong id="charge-sample">—</strong></div>
+            <div><span>预计到 30%</span><strong id="charge-eta-30">—</strong></div>
+            <div><span>预计充满</span><strong id="charge-eta-full">—</strong></div>
+          </div>
+        </div>
+        <canvas id="battery-chart" width="1320" height="280" aria-label="最近六小时电量曲线"></canvas>
+        <div class="legend battery-legend"><span class="soc">SOC</span><span class="charging">充电采样</span><small>速度和预计时间按当前连续上升区间估算，SOC 校准或机器人运行会造成波动</small></div>
+      </article>
+    </section>
+
+    <section class="section view" id="media">
+      <div class="section-heading"><div><span class="eyebrow">05 / AUDIO &amp; VIDEO STREAMS</span><h2>音视频流</h2></div><div class="section-note">视频约 2 fps · 服务端只保留最新一帧 · 仅本页激活时拉流</div></div>
+      <div class="media-grid">
+        <article class="card camera-preview-card">
+          <div class="card-label">RGB 相机实时画面 <span id="camera-preview-status" class="inline-status">加载中</span></div>
+          <div class="vision-toolbar">
+            <div><span class="vision-dot" id="vision-dot"></span><span id="vision-status">正在检查视觉服务</span></div>
+            <button class="vision-toggle" id="vision-toggle" type="button" disabled>启动目标检测</button>
+          </div>
+          <div class="camera-stage" id="camera-stage">
+            <img id="camera-preview" alt="RGB 相机实时画面">
+            <canvas id="detection-overlay" aria-label="目标检测标注"></canvas>
+          </div>
+          <div class="vision-legend" id="vision-legend">
+            <span class="person">人体</span><span class="head">头部</span><span class="face">人脸</span><span class="hand">手部</span>
+            <b id="vision-result-summary">检测未启动</b>
+          </div>
+        </article>
+        <article class="card audio-card">
+          <div class="card-label">麦克风 / 音频输入 <span id="mic-status" class="inline-status">待机</span></div>
+          <div class="audio-level-block">
+            <div class="level-bar-wrap"><div id="mic-level-bar" class="level-bar"></div></div>
+            <div class="level-readout"><strong id="mic-level-db">—</strong><small>dB RMS</small></div>
+          </div>
+          <div id="mic-source" class="mic-source">正在识别主麦克风</div>
+          <div id="mic-channel-grid" class="mic-channel-grid"></div>
+          <canvas id="mic-history-canvas" height="90"></canvas>
+          <div class="wheel-grid audio-grid">
+            <div><span>音频原始流发布者</span><strong id="audio-publishers">—</strong><small>/audio/capture_pcm</small></div>
+            <div><span>关键词事件</span><strong id="audio-kw-status">—</strong><small>/audio/kw_detect</small></div>
+            <div><span>最后事件码</span><strong id="audio-last-event">—</strong><small>触发时更新</small></div>
+          </div>
+          <div class="imu-meta">音频由厂商 media_audio 进程统一采集和阵列处理，通过 /audio/capture_pcm 同时分发给厂商语音服务、Agent 和 Dashboard。Dashboard 不再直接占用 USB 麦克风。</div>
+        </article>
+      </div>
+      <article class="card volume-card">
+        <div class="card-label">扬声器音量 / SPEAKER VOLUME <span id="volume-state" class="status-pill warn"><i></i><span>读取中</span></span></div>
+        <div class="volume-bar">
+          <span class="volume-bound">0</span>
+          <input id="volume-slider" type="range" min="0" max="100" step="1" value="0" disabled aria-label="扬声器音量">
+          <span class="volume-bound">100</span>
+          <output id="volume-value">--</output>
+        </div>
+        <div class="volume-db-bar">
+          <label for="volume-db-input">输出增益 (dB)</label>
+          <input id="volume-db-input" type="number" min="-95.5" max="8" step="0.5" disabled aria-label="扬声器输出增益 dB">
+          <button id="volume-db-apply" type="button" class="btn-secondary" disabled>设置增益</button>
+          <span>0 dB 为原始增益；此数值不是现场声压级</span>
+        </div>
+        <div class="volume-meta"><span id="volume-detail">听感刻度 · ALSA 控件 DAC · duplexaudio</span><span id="volume-error" class="volume-error" hidden></span></div>
+      </article>
+      <article class="card tts-card">
+        <div class="card-label">文字播报 / TTS <span id="tts-status-pill" class="status-pill warn"><i></i><span>待机</span></span></div>
+        <div class="tts-layout">
+          <div class="tts-input-col">
+            <label class="tts-label" for="tts-text">播报内容</label>
+            <textarea id="tts-text" class="tts-text" rows="4" maxlength="300" placeholder="输入要播报的文字，例如：机器人扬声器测试成功"></textarea>
+            <div class="tts-controls" aria-label="语音表现控制">
+              <label class="tts-control">
+                <span>音色</span>
+                <select id="tts-voice-select">
+                  <option value="longanhuan_v3.1">龙安欢 · 活泼女声</option>
+                  <option value="longanlingxin_v3.1">龙安灵心 · 温柔女声</option>
+                  <option value="longanfengyue_v3.1">龙安风悦 · 自然女声</option>
+                  <option value="xunanchuan_v3.1">许南川 · 沉稳男声</option>
+                  <option value="yuxiaoyun_v3.1">于小云 · 元气亲切女声</option>
+                  <option value="qiaoxiaojiao_v3.1">乔小娇 · 俏丽可爱女声</option>
+                  <option value="anmingyuan_v3.1">安明远 · 清亮自然男声</option>
+                  <option value="wenhuaiqing_v3.1">温怀清 · 清亮柔和女声</option>
+                  <option value="baianran_v3.1">白安然 · 低沉浑厚女声</option>
+                  <option value="xuyanchu_v3.1">许言初 · 沉稳磁性女声</option>
+                </select>
+              </label>
+              <label class="tts-control">
+                <span>情绪</span>
+                <select id="tts-emotion-select">
+                  <option value="neutral">自然</option>
+                  <option value="excited">兴奋</option>
+                  <option value="serious">严肃</option>
+                  <option value="empathetic">共情</option>
+                  <option value="curious">好奇</option>
+                  <option value="mischievously">调皮</option>
+                  <option value="whispers">耳语</option>
+                  <option value="sad">悲伤</option>
+                </select>
+              </label>
+              <label class="tts-control tts-speed-control">
+                <span>语速 <output id="tts-speed-value" for="tts-speed">1.00×</output></span>
+                <input id="tts-speed" type="range" min="0.5" max="2" step="0.05" value="1" aria-label="语速">
+              </label>
+            </div>
+            <div class="tts-toolbar">
+              <span class="tts-engine">audio_service · <b id="tts-model">—</b> / <b id="tts-voice">—</b></span>
+              <span id="tts-char-count" class="tts-count">0 / 300</span>
+              <button class="btn-tts" id="tts-stop-button" type="button">停止</button>
+              <button class="btn-tts" id="tts-play-button" type="button">播放</button>
+            </div>
+            <div class="tts-state-line">
+              <strong id="tts-state">等待播放</strong>
+              <span id="tts-detail">输入文字后点击播放，机器人将通过扬声器播报。</span>
+            </div>
+            <p id="tts-error" class="tts-error" hidden></p>
+          </div>
+          <div class="tts-history-col">
+            <span class="tts-history-title">最近播报</span>
+            <div id="tts-history" class="tts-history"><p class="empty-note">暂无播报记录</p></div>
+          </div>
+        </div>
+        <div class="imu-meta">语音由独立服务 <b>audio_service</b> 合成（DashScope），经 <b id="tts-device">/audio/speaker_pcm</b> 交给厂商 media_audio 播放；播放期间不停止麦克风、不占用 ALSA 设备。</div>
+      </article>
+    </section>
+
+    <section class="section view" id="audio-services">
+      <div class="section-heading">
+        <div><span class="eyebrow">AUDIO / SERVICES</span><h2>Audio Service</h2></div>
+        <div class="audio-service-heading-actions">
+          <span id="audio-service-pill" class="status-pill warn"><i></i><span>读取中</span></span>
+          <button id="audio-service-refresh" class="btn-secondary" type="button">刷新</button>
+        </div>
+      </div>
+
+      <div class="audio-service-summary-grid">
+        <article class="card audio-service-summary-card">
+          <span>服务版本</span><strong id="audio-service-version">—</strong><small id="audio-service-uptime">运行时间 —</small>
+        </article>
+        <article class="card audio-service-summary-card">
+          <span>音频输入</span><strong id="audio-service-capture">—</strong><small>/audio/capture_pcm</small>
+        </article>
+        <article class="card audio-service-summary-card">
+          <span>活跃消费者</span><strong id="audio-service-consumers">—</strong><small>WebSocket / Processor</small>
+        </article>
+        <article class="card audio-service-summary-card">
+          <span>处理会话</span><strong id="audio-service-sessions">—</strong><small>ASR / TSE / Agent</small>
+        </article>
+        <article class="card audio-service-summary-card">
+          <span>语音输出</span><strong id="audio-service-output">—</strong><small>TTS → media_audio</small>
+        </article>
+        <article class="card audio-service-summary-card">
+          <span>Audio Agent</span><strong id="audio-agent-state">—</strong><small id="audio-agent-models">Gateway / 前后台模型</small>
+        </article>
+      </div>
+
+      <div id="audio-services-grid" class="audio-services-grid">
+        <article class="card audio-service-placeholder"><p class="empty-note">正在读取音频服务…</p></article>
+      </div>
+
+      <div class="audio-service-detail-grid">
+        <article class="card">
+          <div class="card-label">当前消费者 / CONNECTIONS</div>
+          <div id="audio-service-connections" class="audio-service-list"><p class="empty-note">暂无连接</p></div>
+        </article>
+        <article class="card">
+          <div class="card-label">处理会话 / SESSIONS</div>
+          <div id="audio-service-session-list" class="audio-service-list"><p class="empty-note">暂无运行中的 ASR/TSE 会话</p></div>
+        </article>
+      </div>
+      <p id="audio-service-error" class="tts-error" hidden></p>
+    </section>
+
+    <section class="section view" id="video-services">
+      <div class="section-heading">
+        <div><span class="eyebrow">VIDEO / SERVICES</span><h2>Video Service</h2></div>
+        <div class="section-note">视觉处理能力、模型、数据流与运行开销</div>
+      </div>
+      <article class="card vision-service-card">
+        <div class="vision-service-heading">
+          <div>
+            <div class="card-label">视觉服务 / VISION SERVICE</div>
+            <p>统一呈现当前接入的视频处理能力；新增 processor 后会自动出现在这里。</p>
+          </div>
+          <span id="vision-service-pill" class="status-pill warn"><i></i><span>检查中</span></span>
+        </div>
+        <div class="vision-service-summary">
+          <div><span>服务版本 / 运行时间</span><strong id="vision-service-version">—</strong><small id="vision-service-uptime">—</small></div>
+          <div><span>Processor</span><strong id="vision-service-processors">—</strong><small>运行中 / 总数</small></div>
+          <div><span>服务资源</span><strong id="vision-service-resource">—</strong><small>CPU / RSS</small></div>
+          <div><span>BPU</span><strong id="vision-service-bpu">—</strong><small id="vision-service-bpu-detail">利用率 / 频率</small></div>
+        </div>
+        <div class="vision-processor-heading"><span>当前视频处理服务</span><span>状态 · 数据流 · 模型</span></div>
+        <div id="vision-processor-list" class="vision-processor-list">
+          <p class="empty-note">正在读取视觉服务状态</p>
+        </div>
+        <div class="vision-service-footer">
+          <span id="vision-service-ros">ROS：—</span>
+          <span id="vision-service-bus">结果总线：—</span>
+          <span id="vision-service-endpoint">服务地址：—</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="section view" id="sensors">
+      <div class="section-heading"><div><span class="eyebrow">06 / SENSOR HEALTH</span><h2>传感器健康</h2></div><div class="section-note">仅采集轻量摘要，不订阅点云用于网页推送</div></div>
+      <div id="sensor-grid" class="sensor-grid"></div>
+    </section>
+
+    <section class="section view" id="ros-graph">
+      <div class="section-heading"><div><span class="eyebrow">07 / ROS 2 GRAPH</span><h2>节点与话题</h2></div><div class="section-note" id="graph-count">—</div></div>
+      <div class="graph-layout">
+        <article class="card"><div class="card-label">实际运行节点</div><div id="node-list" class="node-list"></div></article>
+        <article class="card"><div class="card-label">监控话题频率与年龄</div><div class="table-wrap"><table><thead><tr><th>话题</th><th>类型</th><th>频率</th><th>数据年龄</th><th>状态</th></tr></thead><tbody id="topic-table"></tbody></table></div></article>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" id="motion-confirm-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="motion-confirm-title">
+      <span class="eyebrow">CONFIRM / SAFETY</span>
+      <h3 id="motion-confirm-title">确认执行动作</h3>
+      <p id="motion-confirm-text">该动作可能改变机器人姿态或底盘状态。</p>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="motion-confirm-cancel" type="button">取消</button>
+        <button class="btn-danger" id="motion-confirm-ok" type="button">确认执行</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+
+  <footer><span>Zeroth M1 Dashboard</span><span>127.0.0.1:8080 · 本地资源 · ROS 2 Humble</span></footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

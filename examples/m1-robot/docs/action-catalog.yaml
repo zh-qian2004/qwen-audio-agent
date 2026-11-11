@@ -1,0 +1,794 @@
+# Zeroth M1 可调用动作目录（action-catalog）
+# 生成日期: 2026-11-09
+# 依据: 只读调查（.action/.srv 定义文件、ros2 node info、行为树 XML、二进制 strings 交叉验证）
+# 规则: readiness=ready 需通过全部判定标准且已有受控实机验证记录；未经实机验证最多为 candidate
+# 本目录为机器可读清单，供后续 Dashboard 动作网关白名单加载；默认 dashboard_enabled=false
+
+actions:
+  # ============ 首批推荐（candidate，待用户逐项批准实机验证） ============
+
+  - id: map_segmentation
+    display_name: 地图房间分割
+    description: 对现有栅格地图执行房间自动分割，纯计算动作，不驱动任何电机。输入地图为 8UC1 二值图。
+    category: mapping
+    readiness: candidate
+    risk: low
+
+    interface:
+      mechanism: ros_action
+      name: /map_segmentation
+      type: map_optimization_msg/action/MapSegmentation
+      provider_node: /room_segmentation
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: false
+      moves_base: false
+
+    parameters:
+      - name: input_map
+        type: sensor_msgs/Image
+        required: true
+        unit: 8UC1 像素，0=障碍 255=自由
+        range: null
+        enum: null
+      - name: map_resolution
+        type: float32
+        required: true
+        unit: meter/cell
+        range: null
+        enum: null
+      - name: map_origin
+        type: geometry_msgs/Pose
+        required: true
+        unit: meter
+        range: null
+        enum: null
+      - name: return_format_in_pixel
+        type: bool
+        required: true
+        unit: null
+        range: null
+        enum: null
+      - name: return_format_in_meter
+        type: bool
+        required: true
+        unit: null
+        range: null
+        enum: null
+      - name: robot_radius
+        type: float32
+        required: false
+        unit: meter
+        range: ">0 启用房间中心可达性筛选"
+        enum: null
+      - name: room_segmentation_algorithm
+        type: int32
+        required: false
+        unit: null
+        range: null
+        enum: "-1=用预设, 0=预设, 1=形态学, 2=距离变换, 3=Voronoi, 4=语义, 5=随机场(vrf), 99=PassThrough；运行时预设为 5"
+
+    preconditions:
+      robot_online: true
+      no_active_action: false
+      not_fallen: false
+      has_map: true
+      notes: 仅需 /map 话题有数据；与运动状态无关。服务端会向 /userdata/log/room_segmentation_log/ 写入分割 PGM（厂商既有行为）。
+
+    feedback:
+      source: Action result（.action 中 feedback 段为空，无运行中反馈）
+      running_condition: goal 被接受且未返回 result
+      success_condition: result 包含 segmented_map（32SC1，房间标签 1..N）
+      failure_condition: goal 被拒绝或 aborted
+
+    cancellation:
+      supported: true
+      mechanism: ROS Action 原生 cancel_goal（服务端为标准 rclcpp action server）
+      verified: false
+
+    timeout_seconds: 120
+    concurrency_group: computation
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/map_optimization_msg/action/MapSegmentation.action（含完整字段注释）"
+      - "robot:/app/joyin/bin/segment/install/share/room_segmentation/yaml/room_segmentation_action_server_params.yaml"
+      - "ros2 action info /map_segmentation: server=/room_segmentation, clients=0"
+      - "ros2 node info /room_segmentation: 无任何运动类 Publisher，仅发布 /fused_global_map、/processed_occupancy_grid 等地图话题"
+    blockers:
+      - 服务端取消回调的具体行为未逐行确认（仅见标准 rclcpp_action 符号）
+      - 分割结果会更新 /fused_global_map，若导航中调用对代价地图的影响未评估，建议仅在静止时调用
+
+  - id: pause_head_control
+    display_name: 头部声源跟踪暂停/恢复
+    description: 暂停或恢复 start_to_control_head 会话。暂停时头部姿态冻结、会话保留。是头部动作的主要安全原语。
+    category: safety_primitive
+    readiness: candidate
+    risk: low
+
+    interface:
+      mechanism: ros_service
+      name: /audio_track/pause_head_control
+      type: std_srvs/srv/SetBool
+      provider_node: /audio_track_node
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: false
+      moves_base: false
+
+    parameters:
+      - name: data
+        type: bool
+        required: true
+        unit: null
+        range: null
+        enum: "true=暂停(姿态冻结,会话保留), false=恢复"
+
+    preconditions:
+      robot_online: true
+      no_active_action: false
+      not_fallen: false
+      notes: 仅在 start_to_control_head 会话运行中(HeadOnly)有效；声源规划(Full)运行时被拒绝；头部会话未运行时被拒绝。
+
+    feedback:
+      source: Service response (success + message)
+      running_condition: "调用返回 success=true 表示已暂停/恢复"
+      success_condition: response.success=true
+      failure_condition: "response.success=false（头部会话未运行 / 声源规划运行中）"
+
+    cancellation:
+      supported: true
+      mechanism: 本动作即停止原语；再次调用 data=false 恢复
+      verified: false
+
+    timeout_seconds: 5
+    concurrency_group: head_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/audio_track_msgs/action/StartAudioTrack.action 头部注释: 暂停(仅 HeadOnly) ros2 service call /audio_track/pause_head_control std_srvs/srv/SetBool"
+      - "audio_track_main strings: Head control paused (pose frozen, session kept) / Head control resumed / pauseHeadControl rejected: head control not running / pauseHeadControl rejected: planner running"
+    blockers: []
+
+  - id: start_to_control_head
+    display_name: 头部声源跟踪（仅转头）
+    description: 启动声源定位头部控制会话，头部自动转向声源方向。HeadLite 栈不启用里程计/日志，厂商注释明确设计为与导航不冲突。底盘不动。
+    category: head_tracking
+    readiness: candidate
+    risk: medium
+
+    interface:
+      mechanism: ros_action
+      name: /start_to_control_head
+      type: audio_track_msgs/action/StartAudioTrack
+      provider_node: /audio_track_node
+
+    physical_effect:
+      moves_head: true
+      moves_arms: false
+      moves_legs: false
+      moves_base: false
+
+    parameters:
+      - name: command
+        type: int8
+        required: true
+        unit: null
+        range: null
+        enum: "1=启动会话, 0=停止会话（主停机路径）"
+      - name: task
+        type: int8
+        required: false
+        unit: null
+        range: null
+        enum: "start_to_control_head 忽略此字段"
+
+    preconditions:
+      robot_online: true
+      no_active_action: true
+      not_fallen: true
+      notes: >
+        节点内建会话互斥（session already starting or running / head control already running /
+        Reject StartAudioTrack start: head control busy, stop head first）。声源规划(Full)运行时头部会话受拒。
+        厂商 BT(audioLocationHeadControlTree) 要求 !IsFallen；直发 action 是否检查跌倒未确认，须由网关检查
+        /HardwareSelfFall_topic。充电桩上头部动作行为未实机验证，首次测试建议离桩进行。
+
+    feedback:
+      source: Action feedback（feedback uint8 + status_message string）
+      running_condition: feedback==2 (running)
+      success_condition: "启动 goal: result==1；运行中会话通过 feedback==2 持续观测"
+      failure_condition: "启动 goal: result==0（含被拒/传感器故障 SensorFault）"
+      feedback_codes: "1=starting, 2=running, 3=canceling, 4=stopping（10/11/12 仅声源规划 task=1 使用）"
+
+    cancellation:
+      supported: true
+      mechanism: "三重停止: ① command=0 goal（业务主停机路径） ② ros2 action cancel_goal（仅 HeadOnly 有效） ③ /audio_track/pause_head_control 冻结姿态；wbc 另有 head action global timeout 强制停止与头部舵机过流拒绝保护"
+      verified: false
+
+    timeout_seconds: 15
+    concurrency_group: head_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/audio_track_msgs/action/StartAudioTrack.action（厂商注释含完整启动/停止/取消/暂停用法与依赖栈说明）"
+      - "ros2 node info /audio_track_node: 仅发布 /ControlHeadMotion_topic（头部）与 viz 话题；HeadLite 不启 odom/log"
+      - "audio_track_main strings: Enter StopHold / SensorFault / session already starting or running / command=0 owner teardown timeout, fallback stopChannelRuntime"
+      - "libwbc_ctrl_plugin.so strings: head action global timeout (%d cycles), force stop / head_neck servo overcurrent, reject enable"
+      - "robot:/app/joyin/config/audioLocationHeadControlTree.xml: IsFallen 前置条件"
+    blockers:
+      - 跌倒状态是否由 action 服务端自查未确认（网关必须先查 /HardwareSelfFall_topic）
+      - 充电桩上执行头部动作的行为未验证
+      - 停止路径未做实机验证
+
+  - id: pause_to_navigation
+    display_name: 导航暂停/恢复
+    description: 暂停或恢复进行中的导航会话。静止时调用会被安全拒绝（"navigation is not running"），因此可在无导航时安全验证调用链。
+    category: safety_primitive
+    readiness: candidate
+    risk: low
+
+    interface:
+      mechanism: ros_service
+      name: /pause_to_navigation
+      type: navigation_msgs/srv/PauseToNavigation
+      provider_node: /joyin_navigation_node
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: false
+      moves_base: false
+
+    parameters:
+      - name: pause_type
+        type: uint8
+        required: true
+        unit: null
+        range: null
+        enum: "1=暂停, 2=继续"
+
+    preconditions:
+      robot_online: true
+      no_active_action: false
+      not_fallen: false
+      notes: 导航未运行时返回 "Pause ignored, navigation is not running"；已暂停时重复暂停返回 "Navigation is already paused"。
+
+    feedback:
+      source: Service response (result + message)
+      running_condition: "result 表示受理（message 含成功文案）"
+      success_condition: "Pause succeeded. / Hold on succeeded."
+      failure_condition: "Pause ignored, navigation is not running / Invalid value for pause type"
+
+    cancellation:
+      supported: true
+      mechanism: 本动作即导航会话的暂停原语；恢复用 pause_type=2
+      verified: false
+
+    timeout_seconds: 5
+    concurrency_group: robot_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/navigation_msgs/srv/PauseToNavigation.srv"
+      - "joyin_navigation strings: Pause succeeded / Navigation is already paused / Hold on ignored, navigation is not paused / Pause ignored, navigation is not running / Invalid value for pause type"
+    blockers: []
+
+  - id: start_to_navigation
+    display_name: 两点导航（近距离安全点）
+    description: 导航到当前地图指定目标点。经 Nav2 全流程输出 /cmd_vel 由 wbc 转为步态，线速度上限 0.35 m/s、角速度上限 0.6 rad/s。首批仅建议 1-2 m 内近距离目标点。
+    category: navigation
+    readiness: candidate
+    risk: high
+
+    interface:
+      mechanism: ros_action
+      name: /start_to_navigation
+      type: navigation_msgs/action/StartToNavigation
+      provider_node: /joyin_navigation_node
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: true
+      moves_base: true
+
+    parameters:
+      - name: navigation_mode
+        type: uint8
+        required: true
+        unit: null
+        range: null
+        enum: "1=两点导航(必须给 navigation_goal), 2=自主探索"
+      - name: navigation_goal
+        type: geometry_msgs/PoseStamped
+        required: "是(仅 mode=1)"
+        unit: meter / rad
+        range: null
+        enum: null
+
+    preconditions:
+      robot_online: true
+      no_active_action: true
+      not_fallen: true
+      not_on_charger: true
+      has_map: true
+      localization_valid: true
+      notes: >
+        厂商 BT(naviSubTree) 在导航前执行离桩/重定位；直发 action 是否自带这些处理未确认，网关必须自行校验
+        on_charger、定位有效性(/tracked_pose)、地图存在。单 goal 策略：重复发 goal 被拒
+        ("please do not publish goals repeatedly")。调查时机器人位于充电桩(on_charger=2)。
+
+    feedback:
+      source: Action feedback（feedback uint8 + message string）
+      running_condition: goal 被接受且未终止；可配合 /global_plan、/cmd_vel 观测
+      success_condition: "result 表示到达（message 字符串；数值码表未知）"
+      failure_condition: "result 表示失败（含 robot got stuck / explore failure；数值码表未知）"
+      feedback_codes: null
+
+    cancellation:
+      supported: true
+      mechanism: "① ROS Action 原生 cancel_goal（'Receive cancel goal'/'Navigation is canceled'）② /pause_to_navigation 暂停；底层 Nav2 卡死/打滑/侧倾检测由 motion_server stuck/slip/step checker 兜底"
+      verified: false
+
+    timeout_seconds: 300
+    concurrency_group: robot_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/navigation_msgs/action/StartToNavigation.action"
+      - "joyin_navigation strings: Receive cancel goal for starting to navigation / Navigation is canceled / Navigation action is undefined, no need to cancel / please do not publish goals repeatedly / robot got stuck"
+      - "mini_navigation_params.yaml: max_linear_vel=0.35 m/s, max_angular_vel=0.6 rad/s, xy_goal_tolerance=0.10 m, yaw_goal_tolerance=0.2618 rad"
+      - "ros2 action info: server=/joyin_navigation_node, clients=0（当前无活动客户端）"
+    blockers:
+      - result/feedback 数值码表未知（仅有 message 字符串）
+      - 充电桩上直发 goal 的行为未知（BT 会先离桩，直发不会）
+      - 与 APP/语音经同一 action 并发时的仲裁细节未知（单 goal 策略可缓解）
+      - 未做任何实机验证
+
+  # ============ 次批候选（证据较完整，但风险或依赖更高，首批不动） ============
+
+  - id: start_to_track
+    display_name: 视觉跟随避障
+    description: 视觉跟随目标人并避障。会驱动底盘行走（跟随距离保持），直接发布 /ControlBipedMotion_topic 与 /cmd_vel。
+    category: tracking
+    readiness: candidate
+    risk: high
+
+    interface:
+      mechanism: ros_action
+      name: /start_to_track
+      type: mini_track_msgs/action/StartTrack
+      provider_node: /vision_track_node
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: true
+      moves_base: true
+
+    parameters:
+      - name: command
+        type: int8
+        required: true
+        unit: null
+        range: null
+        enum: "1=启动跟随避障, 0=停止跟随避障"
+
+    preconditions:
+      robot_online: true
+      no_active_action: true
+      not_fallen: true
+      not_on_charger: true
+      notes: 需视野内有可跟随人员；反馈字段厂商注明"请暂时忽略"。
+
+    feedback:
+      source: Action feedback（feedback uint8 + status_message string）
+      running_condition: 厂商未定义运行中反馈语义（"反馈信息，请暂时忽略"）
+      success_condition: "启动/停止 goal: result==1"
+      failure_condition: "启动/停止 goal: result==0"
+
+    cancellation:
+      supported: true
+      mechanism: "① command=0 goal ② 原生 cancel_goal（handleCancel → stopTracking，strings: Track loop stopped successfully / Track loop stop failed or timeout）③ /track/pause_track_control SetBool 暂停"
+      verified: false
+
+    timeout_seconds: 15
+    concurrency_group: robot_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/mini_track_msgs/action/StartTrack.action（厂商注释含完整 CLI 用法）"
+      - "ros2 node info /vision_track_node: 发布 /ControlBipedMotion_topic、/cmd_vel、/ControlHeadMotion_topic"
+      - "vision_track_main strings: MODE_PAUSE / MODE_STOP / handleCancel stopTracking result=%s"
+    blockers:
+      - 无可靠运行中反馈语义，Dashboard 状态展示只能依赖 /HardwareVehicleFeedback 等旁路观测
+      - 运动范围不可控（跟人走），需大场地
+      - 未实机验证
+
+  - id: start_to_audio_track
+    display_name: 声源跟随（规划+控头，Full 栈）
+    description: 声源定位全栈会话：含里程计、路径规划与底盘运动，机器人会走向声源并保持距离。Full 时拒控头 Stop/Cancel，暂停仅 HeadOnly 有效。
+    category: tracking
+    readiness: candidate
+    risk: high
+
+    interface:
+      mechanism: ros_action
+      name: /start_to_audio_track
+      type: audio_track_msgs/action/StartAudioTrack
+      provider_node: /audio_track_node
+
+    physical_effect:
+      moves_head: true
+      moves_arms: false
+      moves_legs: true
+      moves_base: true
+
+    parameters:
+      - name: command
+        type: int8
+        required: true
+        unit: null
+        range: null
+        enum: "1=启动, 0=停止（整栈拆除）"
+      - name: task
+        type: int8
+        required: false
+        unit: null
+        range: null
+        enum: "0=声影随行(默认), 1=主动交互/一句话(找人脸)"
+
+    preconditions:
+      robot_online: true
+      no_active_action: true
+      not_fallen: true
+      not_on_charger: true
+      notes: 与 start_to_control_head 同一状态机（Idle → HeadOnly → Full），二者互斥由节点保证。
+
+    feedback:
+      source: Action feedback
+      running_condition: feedback==2 (running)
+      success_condition: "启动 goal: result==1"
+      failure_condition: "启动 goal: result==0"
+      feedback_codes: "1=starting, 2=running, 3=canceling, 4=stopping, 10/11/12=找脸会话(task=1)"
+
+    cancellation:
+      supported: true
+      mechanism: "① command=0 goal（整栈拆除）② 原生 cancel_goal；注意 Full 时拒控头 Stop/Cancel，必须走规划通道"
+      verified: false
+
+    timeout_seconds: 15
+    concurrency_group: robot_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/audio_track_msgs/action/StartAudioTrack.action"
+      - "audio_track_main strings: planner already running / planner full stack stopped successfully / Embedded odom stop ok"
+    blockers:
+      - 会驱动底盘，运动范围取决于声源位置，场地要求高
+      - 未实机验证
+
+  - id: start_to_SLAM
+    display_name: 启动建图/定位
+    description: 启动 Cartographer 建图（机器人原地旋转对齐原点）或定位模式。会覆盖 /userdata/joyin/config/slam/map.pbstream 相关流程。
+    category: mapping
+    readiness: blocked
+    risk: high
+
+    interface:
+      mechanism: ros_action
+      name: /start_to_SLAM
+      type: cartographer_ros_msgs/action/StartToSLAM
+      provider_node: /cartographer_node
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: true
+      moves_base: true
+
+    parameters:
+      - name: slam_mode
+        type: uint8
+        required: true
+        unit: null
+        range: null
+        enum: "0=建图模式, 1=定位模式"
+
+    preconditions:
+      robot_online: true
+      no_active_action: true
+      not_fallen: true
+      notes: null
+
+    feedback:
+      source: Action feedback（cartographer_ros_msgs/StatusResponse）
+      running_condition: null
+      success_condition: null
+      failure_condition: null
+
+    cancellation:
+      supported: true
+      mechanism: "/slam/cancel (Empty) 或 /BusinessCancelSlam_topic (Empty)；建图会话另有 /slam/pause /slam/resume /slam/save"
+      verified: false
+
+    timeout_seconds: null
+    concurrency_group: robot_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/share/cartographer_ros_msgs/action/StartToSLAM.action"
+      - "ros2 action info /start_to_SLAM: server=/cartographer_node, client=/business"
+    blockers:
+      - 建图会重写地图与 map.pbstream，现有地图丢失风险未评估（回滚方案缺失）
+      - StatusResponse 语义与完成条件未确认
+      - 原地旋转的物理风险需专门场地
+
+  - id: go_charge
+    display_name: 自动回充
+    description: 完整回充行为树任务（检查可充→离桩→导航至桩→短距对接）。外部入口为 /BusinessAppReq_topic JSON 命令，schema 未知。
+    category: dock
+    readiness: blocked
+    risk: high
+
+    interface:
+      mechanism: json_topic
+      name: /BusinessAppReq_topic
+      type: std_msgs/msg/String (JSON)
+      provider_node: /business
+
+    physical_effect:
+      moves_head: true
+      moves_arms: false
+      moves_legs: true
+      moves_base: true
+
+    parameters: []
+
+    preconditions:
+      robot_online: true
+      no_active_action: true
+      not_fallen: true
+      has_map: true
+
+    feedback:
+      source: "/BusinessAppRes_topic / /BusinessAppRpt_topic"
+      running_condition: null
+      success_condition: null
+      failure_condition: null
+
+    cancellation:
+      supported: null
+      mechanism: null
+      verified: false
+
+    timeout_seconds: null
+    concurrency_group: robot_motion
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+
+    evidence:
+      - "robot:/app/joyin/config/openChargeTree.xml（IsOnCar/CheckAbleToCharge/HasMap/Relocation/GoCharge 完整前置链）"
+      - "control_pm.json: charging_dock_plugin 内部状态机经 /ControlGoCharge_topic"
+    blockers:
+      - 触发命令的 JSON 字段名与完整 schema 未知
+      - 回充任务的取消/中止路径未知（BT 任务中断语义不明）
+      - 建议后续批次处理
+
+  # ============ 2026-11-09 22:42 实机验证新增 ============
+
+  - id: get_up_gait10
+    display_name: 起身站立（跌倒爬起步态）
+    description: 机器人仰躺/俯卧且舵机失能时，发送 gait 10 触发 wbc 原生 get-up 恢复序列，起身至双足站立待命（Bipedal_Movement_mode + STOP_STATE）。2026-11-09 22:42 已实机验证成功。
+    category: body_motion
+    readiness: ready
+    risk: medium
+
+    interface:
+      mechanism: ros_topic_mid_layer
+      name: /ControlBipedMotion_topic
+      type: plan/msg/BipedMotionCmd
+      provider_node: /control (wbc_ctrl_plugin)
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: true
+      moves_base: true
+
+    parameters:
+      - name: control_mode
+        type: uint8
+        required: true
+        value: 1  # MODE_WALK_GAIT
+        note: ""
+      - name: gait_type
+        type: uint8
+        required: true
+        value: 10  # GAIT_FALLING_DOWN_AND_GEITTING_UP 前向趴倒跌倒爬起；仰躺实际由 wbc 按 FALLING_ON_BACK_AND_GETTING_UP_STATE 处理
+        note: "11 = 后仰爬起(带姿态调整)。其余字段填 0"
+
+    preconditions:
+      robot_online: true
+      no_active_action: true
+      lying_or_crouched: true
+      battery_above_6_percent: true
+
+    feedback:
+      source: "/ControlBipedMotionFeedback_topic + /userdata/log/control/wbc_ctrl_plugin.log"
+      running_condition: "feedback gait 离开 53/29，HardwareMotorCurrent 非零（实测峰值 812）"
+      success_condition: "feedback (1, 0)，wbc: Motor_Disable_mode --> Bipedal_Movement_mode 且 state --> STOP_STATE，IMU pitch ≈ 0.9°"
+      failure_condition: "wbc 日志出现 reject / unknown gait_type；25s 内状态未变化"
+
+    cancellation:
+      supported: null
+      mechanism: "一次性动作（约 8s）自然结束；gait 0 / webctl MOTION_STOP 是否可中断爬起过程未验证"
+      verified: false
+
+    timeout_seconds: 20
+    concurrency_group: robot_motion
+    confirmed_on_hardware: true
+    dashboard_enabled: false
+
+    evidence:
+      - "实机验证 2026-11-09 22:42:24-32：gait 10 发布后 8s 完成起身，IMU -68° → 0.9°"
+      - "robot:/userdata/log/control/wbc_ctrl_plugin.log（FALLING_ON_BACK_AND_GETTING_UP_STATE --> STOP_STATE）"
+      - "wbc 启动即等待：'current: servos unloaded, waiting for get-up / please perform get-up to finish init'"
+    blockers:
+      - 爬起过程中途取消未验证（动作仅 8s，风险有限）
+      - gait 10 与 11 的适用姿态（俯卧 vs 仰躺）选择逻辑未完全确认（本次仰躺用 10 成功）
+
+  - id: stand_up_via_business
+    display_name: 独立站立指令（业务层路径）
+    description: 厂商政策：来自语音对话以外的独立起立指令（APP/网页/BusinessAppReq 注入，如 webctl GET_UP）被 instruction_task.cc:229 'outside contains StandBy, ignore this command' 有意忽略。起立的业务级入口仅语音对话可用。
+    category: body_motion
+    readiness: blocked
+    risk: low
+
+    interface:
+      mechanism: vendor_web_api
+      name: "http://127.0.0.1:12321/api/control {\"command\":\"GET_UP\"}"
+      type: JSON over HTTP (utils_webctl_plugin)
+      provider_node: /utils (utils_webctl_plugin → /BusinessAppReq_topic)
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: false
+      moves_base: false
+
+    parameters:
+      - name: command
+        type: string
+        required: true
+        value: GET_UP
+        note: "同界面其他命令: MOVE_FORWARD/BACKWARD, STRAFE_LEFT/RIGHT, ROTATE_LEFT/RIGHT, GET_ON_CAR, GET_OFF_CAR, HEAD_UP, HEAD_RESET, WAVE_HAND, HAND_RESET, BEND_WAIST, STRAIGHTEN_WAIST, RETURN_TO_CHARGE, VISUAL_GET_ON_CAR, MOTION_STOP"
+
+    preconditions:
+      is_voice_dialogue: true  # 仅语音对话路径不被忽略
+
+    feedback:
+      source: "HTTP 响应 {status:success}（仅表示已受理）"
+      running_condition: null
+      success_condition: null
+      failure_condition: "business_task_plugin.log 出现 'outside contains StandBy, ignore this command'"
+
+    cancellation:
+      supported: true
+      mechanism: MOTION_STOP
+      verified: false
+
+    timeout_seconds: null
+    concurrency_group: robot_motion
+    confirmed_on_hardware: true
+    dashboard_enabled: false
+
+    evidence:
+      - "实机验证 2026-11-09 22:37:33：GET_UP 受理但被业务层忽略，仅触发头灯/表情"
+      - "robot:/userdata/log/business/business_task_plugin.log 22:37:35.904"
+    blockers:
+      - 外部注入的 StandBy 类指令被厂商策略有意忽略，需语音对话上下文才能执行
+
+  # ============ 内部组件开关（不作为独立动作接入） ============
+
+  - id: follow_polar_control
+    display_name: 跟随极坐标开关（视觉/声源内部组件）
+    description: /follow_polar_control（/vision 服务端）与 /audio_track/follow_polar_control（/vision 服务端）是跟踪栈内部组件开关，独立调用语义不明。
+    category: internal_toggle
+    readiness: forbidden
+    risk: medium
+
+    interface:
+      mechanism: ros_service
+      name: /follow_polar_control; /audio_track/follow_polar_control
+      type: std_srvs/srv/SetBool
+      provider_node: /vision
+
+    physical_effect:
+      moves_head: false
+      moves_arms: false
+      moves_legs: false
+      moves_base: false
+
+    parameters: []
+    preconditions:
+      robot_online: true
+    feedback:
+      source: ""
+      running_condition: ""
+      success_condition: ""
+      failure_condition: ""
+    cancellation:
+      supported: false
+      mechanism: ""
+      verified: false
+    timeout_seconds: null
+    concurrency_group: none
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+    evidence:
+      - "ros2 node info /vision: 两个 SetBool 服务端；audio_track_node 与 vision_track_node 为其客户端"
+    blockers:
+      - 跟踪会话之外调用会破坏内部状态一致性，禁止独立接入
+
+  # ============ 明确禁止（本阶段及后续均不得从 Dashboard 调用） ============
+
+  - id: forbidden_lowlevel_motor_set
+    display_name: 禁用接口集合（底层电机/工厂/高危动作）
+    description: >
+      以下接口一律 forbidden：/ControlMotor*（速度/位置/角度/行程/时间/PID 直写）、/ControlEnableMotor_topic、
+      /ControlVehicleSpeed_topic、/ControlVehicleVelocity_topic、/sec_develop_cmd_topic 全部电机类 JSON 命令
+      （single_motor_control/multi_motor_control/motor_torque_control/motor_home_set/action_imitation）、
+      /ControlBipedMotion_topic 直发、/cmd_vel 直发、/HardwareMcuFctCheck_action、/factory_auto、/factory_jpeg、
+      /manual_enable_servo_and_init_imu、上下小车（gait 8/9、getOnCarTree）、跌倒爬起（gait 10/11、action_type 1）、
+      跨步（gait 14）、调腿长（gait 16）、/GattServiceControl、/RemotePairControl、lifecycle change_state 系列。
+      以上绕过 wbc 平衡/安全层或属于工厂测试链路，极易摔机或破坏配对/标定。
+    category: forbidden
+    readiness: forbidden
+    risk: critical
+
+    interface:
+      mechanism: mixed
+      name: "（见 description 内清单）"
+      type: null
+      provider_node: null
+
+    physical_effect:
+      moves_head: true
+      moves_arms: true
+      moves_legs: true
+      moves_base: true
+
+    parameters: []
+    preconditions:
+      robot_online: true
+    feedback:
+      source: ""
+      running_condition: ""
+      success_condition: ""
+      failure_condition: ""
+    cancellation:
+      supported: false
+      mechanism: ""
+      verified: false
+    timeout_seconds: null
+    concurrency_group: forbidden
+    confirmed_on_hardware: false
+    dashboard_enabled: false
+    evidence:
+      - "D:/projects/m1-robot/control-interface-inventory.md 第 3.3/3.5 节与第 6 节禁止清单"
+      - "BipedMotionCmd.msg gait 枚举 8/9/10/11/14/16 对应上下小车/爬起/跨步/调腿长"
+    blockers:
+      - 除非获得厂商完整协议与专门授权，永久禁止

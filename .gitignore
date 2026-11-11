@@ -5,6 +5,7 @@ dist/
 .venv/
 .qwen-audio/
 __pycache__/
+.pytest_cache/
 *.py[cod]
 .env
 .env.*
@@ -28,6 +29,11 @@ config/opencode-workspace/*
 config/openclaw-workspace/*
 !config/openclaw-workspace/AGENTS.md
 testws/
+examples/m1-robot/m1-robot.config.local.json
+examples/m1-robot/**/backups/
+examples/m1-robot/**/state/
+examples/m1-robot/**/*.local.json
+examples/m1-robot/deploy/*debug*.config.json
 config/opencode/opencode.jsonc
 config/opencode/node_modules/
 config/opencode/bun.lock

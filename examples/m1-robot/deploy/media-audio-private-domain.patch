@@ -1,0 +1,31 @@
+--- run.sh
++++ run.sh
+@@ -188,7 +188,7 @@
+                 taskset -c "${AFFINITY_MEDIA_AUDIO}" ./media_audio_kaidishi >/dev/null 2>&1 &
+         fi
+     else
+-        if [ ! -f "/userdata/joyin/.disable_media_audio_autostart" ]; then taskset -c "${AFFINITY_MEDIA_AUDIO}" ./media_audio >/dev/null 2>&1 & fi
++        if [ ! -f "/userdata/joyin/.disable_media_audio_autostart" ]; then ROS_DOMAIN_ID=43 taskset -c "${AFFINITY_MEDIA_AUDIO}" ./media_audio >/dev/null 2>&1 & fi
+     fi
+     ./media_video >/dev/null 2>&1 &
+     if [[ "${joyin_biz}" = "KAIDISHI" ]]; then
+@@ -346,7 +346,7 @@
+                 ./media_audio_kaidishi >/dev/null 2>&1 &
+         fi
+     else
+-        if [ ! -f "/userdata/joyin/.disable_media_audio_autostart" ]; then ./media_audio >/dev/null 2>&1 & fi
++        if [ ! -f "/userdata/joyin/.disable_media_audio_autostart" ]; then ROS_DOMAIN_ID=43 ./media_audio >/dev/null 2>&1 & fi
+     fi
+     ./media_video >/dev/null 2>&1 &
+     cd - >/dev/null
+--- watchdog.sh
++++ watchdog.sh
+@@ -68,7 +68,7 @@
+     WATCH_LIST+=("iot_video_demo|./iot_video_demo|cd ${BIN_DIR} && ./iot_video_demo >/dev/null 2>&1 &")
+ else
+     if [ ! -f "/userdata/joyin/.disable_media_audio_autostart" ]; then
+-    WATCH_LIST+=("media_audio|./media_audio|cd ${BIN_DIR} && taskset -c ${AFFINITY_MEDIA_AUDIO} ./media_audio >/dev/null 2>&1 &")
++    WATCH_LIST+=("media_audio|./media_audio|cd ${BIN_DIR} && env ROS_DOMAIN_ID=43 taskset -c ${AFFINITY_MEDIA_AUDIO} ./media_audio >/dev/null 2>&1 &")
+     fi
+     WATCH_LIST+=("media_tciot|./media_tciot|cd ${BIN_DIR} && ./media_tciot >/dev/null 2>&1 &")
+ fi

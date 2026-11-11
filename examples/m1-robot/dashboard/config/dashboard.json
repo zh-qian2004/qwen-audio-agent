@@ -1,0 +1,124 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "push_rate_hz": 10,
+  "history_seconds": 60,
+  "battery_history_seconds": 21600,
+  "battery_history_sample_seconds": 15,
+  "battery_history_log": "auto",
+  "audio": {
+    "topic": "/audio/capture_pcm",
+    "base_url": "http://127.0.0.1:8091",
+    "level_path": "/api/audio/level",
+    "ws_path": "/ws/audio/input?delivery=continuous&pre_roll_ms=0",
+    "poll_interval_seconds": 0.1,
+    "request_timeout_seconds": 1.0,
+    "reconnect_min_seconds": 0.5,
+    "reconnect_max_seconds": 5.0,
+    "source_label": "厂商 media_audio 处理后麦克风流",
+    "sample_rate_hz": 16000,
+    "sample_format": "S16_LE",
+    "channels": 1,
+    "stale_after_seconds": 2
+  },
+  "tts": {
+    "enabled": true,
+    "base_url": "http://127.0.0.1:8091",
+    "speaker_topic": "/audio/speaker_pcm",
+    "max_text_length": 300,
+    "queue_capacity": 8,
+    "status_timeout_seconds": 2,
+    "speak_timeout_seconds": 8,
+    "cache_ttl_seconds": 0.8,
+    "refresh_interval_seconds": 1.0
+  },
+  "audio_agent": {
+    "stale_after_seconds": 6
+  },
+  "vision": {
+    "enabled": true,
+    "base_url": "http://127.0.0.1:8092",
+    "request_timeout_seconds": 1.5,
+    "cache_ttl_seconds": 0.8,
+    "refresh_interval_seconds": 1.0
+  },
+  "speaker_volume": {
+    "card": "duplexaudio",
+    "controls": ["DAC"],
+    "min_percent": 0,
+    "max_percent": 100,
+    "min_db_gain": -95.5,
+    "max_db_gain": 8,
+    "db_step": 0.5,
+    "timeout_seconds": 3,
+    "cache_ttl_seconds": 1
+  },
+  "joints": [
+    {"index": 0, "name": "left_arm_shoulder_pitch", "label": "左肩俯仰", "group": "left_arm", "min": -143.5, "max": 158.5},
+    {"index": 1, "name": "left_arm_shoulder_roll", "label": "左肩侧摆", "group": "left_arm", "min": -35.0, "max": 98.0},
+    {"index": 2, "name": "left_arm_elbow_roll", "label": "左肘侧摆", "group": "left_arm", "min": -37.0, "max": 103.0},
+    {"index": 3, "name": "left_arm_gripper_unused", "label": "左夹爪（未使用）", "group": "left_arm", "min": 0.0, "max": 0.0},
+    {"index": 4, "name": "right_arm_shoulder_pitch", "label": "右肩俯仰", "group": "right_arm", "min": -158.5, "max": 143.5},
+    {"index": 5, "name": "right_arm_shoulder_roll", "label": "右肩侧摆", "group": "right_arm", "min": -98.0, "max": 35.0},
+    {"index": 6, "name": "right_arm_elbow_roll", "label": "右肘侧摆", "group": "right_arm", "min": -103.0, "max": 37.0},
+    {"index": 7, "name": "right_arm_gripper_unused", "label": "右夹爪（未使用）", "group": "right_arm", "min": 0.0, "max": 0.0},
+    {"index": 8, "name": "left_leg_hip_yaw", "label": "左髋偏航", "group": "left_leg", "min": -16.0, "max": 16.0},
+    {"index": 9, "name": "left_leg_hip_roll", "label": "左髋侧摆", "group": "left_leg", "min": -20.0, "max": 20.0},
+    {"index": 10, "name": "left_leg_hip_pitch", "label": "左髋俯仰", "group": "left_leg", "min": -160.0, "max": 49.0},
+    {"index": 11, "name": "left_leg_knee_pitch", "label": "左膝俯仰", "group": "left_leg", "min": -150.0, "max": 62.0},
+    {"index": 12, "name": "left_leg_ankle_pitch", "label": "左踝俯仰", "group": "left_leg", "min": -67.0, "max": 140.0},
+    {"index": 13, "name": "left_leg_ankle_roll", "label": "左踝侧摆", "group": "left_leg", "min": -25.0, "max": 102.0},
+    {"index": 14, "name": "right_leg_hip_yaw", "label": "右髋偏航", "group": "right_leg", "min": -16.0, "max": 16.0},
+    {"index": 15, "name": "right_leg_hip_roll", "label": "右髋侧摆", "group": "right_leg", "min": -20.0, "max": 20.0},
+    {"index": 16, "name": "right_leg_hip_pitch", "label": "右髋俯仰", "group": "right_leg", "min": -49.0, "max": 160.0},
+    {"index": 17, "name": "right_leg_knee_pitch", "label": "右膝俯仰", "group": "right_leg", "min": -62.0, "max": 150.0},
+    {"index": 18, "name": "right_leg_ankle_pitch", "label": "右踝俯仰", "group": "right_leg", "min": -140.0, "max": 67.0},
+    {"index": 19, "name": "right_leg_ankle_roll", "label": "右踝侧摆", "group": "right_leg", "min": -102.0, "max": 25.0}
+  ],
+  "groups": [
+    {"id": "head", "label": "头部"},
+    {"id": "left_arm", "label": "左臂"},
+    {"id": "right_arm", "label": "右臂"},
+    {"id": "left_leg", "label": "左腿"},
+    {"id": "right_leg", "label": "右腿"}
+  ],
+  "topics": {
+    "joints": {"name": "/HardwareKinematic_topic", "type": "hardware/msg/KinematicState", "stale_after": 1.0},
+    "imu": {"name": "/HardwareImuStd_topic", "type": "sensor_msgs/msg/Imu", "stale_after": 1.0},
+    "battery": {"name": "/HardwareBat_topic", "type": "hardware/msg/Bat", "stale_after": 3.0},
+    "head": {"name": "/HardwareHeadPosition_topic", "type": "hardware/msg/HeadPosition", "stale_after": 3.0},
+    "vehicle": {"name": "/HardwareVehicleFeedback_topic", "type": "hardware/msg/VehicleFeedback", "stale_after": 3.0},
+    "motion_feedback": {"name": "/ControlBipedMotionFeedback_topic", "type": "plan/msg/BipedMotionCmd", "stale_after": 1.0},
+    "self_fall": {"name": "/HardwareSelfFall_topic", "type": "std_msgs/msg/UInt32", "stale_after": 3.0},
+    "motor_current": {"name": "/HardwareMotorCurrent_topic", "type": "std_msgs/msg/Int16MultiArray", "stale_after": 3.0},
+    "motor_load": {"name": "/HardwareMotorLoad_topic", "type": "std_msgs/msg/Int16MultiArray", "stale_after": 3.0},
+    "motor_temp": {"name": "/HardwareMotorTemp_topic", "type": "std_msgs/msg/UInt8MultiArray", "stale_after": 3.0},
+    "motor_error": {"name": "/HardwareMotorErr_topic", "type": "std_msgs/msg/UInt8MultiArray", "stale_after": 3.0},
+    "lidar": {"name": "/HardwareLidar_topic", "type": "sensor_msgs/msg/LaserScan", "stale_after": 3.0},
+    "itof": {"name": "/HardwareItof/camera_info", "type": "sensor_msgs/msg/CameraInfo", "stale_after": 3.0},
+    "camera": {"name": "/camera/camera_info", "type": "sensor_msgs/msg/CameraInfo", "stale_after": 4.0},
+    "audio": {"name": "/audio/capture_pcm", "type": "sensor_msgs/msg/Image", "stale_after": 2.0},
+    "audio_keyword": {"name": "/audio/kw_detect", "type": "std_msgs/msg/Int32MultiArray", "stale_after": 30.0},
+    "go_charge_done": {"name": "/ControlGoChargeDone_topic", "type": "std_msgs/msg/UInt8", "stale_after": 300.0}
+  },
+  "sensors": {
+    "lidar": {"label": "2D LiDAR", "topic_key": "lidar", "presence_topic": "/HardwareLidar_topic"},
+    "itof": {"label": "iTOF 深度相机", "topic_key": "itof", "presence_topic": "/HardwareItof/depth_image"},
+    "camera": {"label": "RGB 相机", "topic_key": "camera", "presence_topic": "/camera/image_h264"},
+    "audio": {"label": "麦克风 / 音频", "topic_key": "audio", "presence_topic": "/audio/capture_pcm"}
+  },
+  "units": {
+    "joint_angle": "degree (°)",
+    "joint_velocity": "MCU int16 raw value (official unit not specified)",
+    "head_angle": "degree (°), raw value / 100",
+    "angular_velocity": "rad/s",
+    "linear_acceleration": "m/s²",
+    "battery_voltage": "V, bat_vol mV / 1000",
+    "wheel_speed": "MCU int32 raw value (official unit not specified)"
+  },
+  "sources": [
+    "Robot runtime ROS 2 graph and message samples",
+    "/app/joyin/config/robot.urdf and hardware_pm.json",
+    "https://github.com/ZerothRobot/Zeroth-M1_EDU_Deploy/blob/main/api/readme_cn.md"
+  ]
+}

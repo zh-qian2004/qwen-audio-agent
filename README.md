@@ -238,12 +238,13 @@ chat naturally and get real work done.
 | X-Omni | Visual conversation, on-demand capture, optional observation and narration. | [Example](https://github.com/QwenAudio/qwen-audio-agent/tree/main/examples/x-omni/README.md) | Available |
 | AI Passport | Qwen Voice Bean on a hardware card, with voice conversation and backend tasks. Currently half-duplex only. | [Example][ai-passport-example] | Available |
 | Customer Service | Voice customer service for retail and airline scenarios. | [Example](https://github.com/QwenAudio/qwen-audio-agent/tree/main/examples/customer-service/README.md) | Available |
-| Embodied intelligence | Voice commands, action execution, inspection, and exception feedback. | TBD | Planned |
+| Zeroth M1 Robot | Realtime voice, a state dashboard, visual detection, and safety-gated motion control. | [Example][m1-robot-example] | Available on `feat/m1-robot` |
 | Livestream assistant | Audience interaction, product explanation, coupons, and risk reminders. | TBD | Planned |
 
 [desktop-docs]: docs/desktop/overview.md
 [smart-cockpit-example]: examples/smart-cockpit
 [ai-passport-example]: examples/ai-passport
+[m1-robot-example]: examples/m1-robot/README.md
 
 ## Community
 

@@ -255,6 +255,12 @@ async def vision_latest_detection():
     return JSONResponse(status_code=status, content=data)
 
 
+@app.get("/api/vision/tracks/latest")
+async def vision_latest_tracks():
+    status, data = await asyncio.to_thread(VISION.latest_tracks)
+    return JSONResponse(status_code=status, content=data)
+
+
 @app.post("/api/vision/processors/object_detection/start")
 async def vision_start_detection():
     status, data = await asyncio.to_thread(VISION.control_detection, "start")

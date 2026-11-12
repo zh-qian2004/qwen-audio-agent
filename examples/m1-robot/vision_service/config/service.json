@@ -2,7 +2,7 @@
   "service": {
     "host": "127.0.0.1",
     "port": 8092,
-    "version": "0.1.0",
+    "version": "0.2.0",
     "history_size": 100,
     "result_stale_after_seconds": 1.5
   },
@@ -24,7 +24,20 @@
       "confidence_threshold": 0.5,
       "source_stale_after_seconds": 1.0,
       "warmup_seconds": 3.0,
-      "model": "multitask_body_head_face_hand_kps_960x544.hbm"
+      "model": "multitask_body_head_face_hand_kps_960x544.hbm",
+      "output_classes": ["person"]
+    },
+    "person_tracking": {
+      "enabled": true,
+      "auto_start": true,
+      "source": "object_detection",
+      "algorithm": "iou_center_motion",
+      "iou_threshold": 0.2,
+      "center_distance_threshold": 0.18,
+      "smoothing_alpha": 0.65,
+      "velocity_alpha": 0.5,
+      "min_confirmed_hits": 2,
+      "max_missed_frames": 10
     }
   }
 }

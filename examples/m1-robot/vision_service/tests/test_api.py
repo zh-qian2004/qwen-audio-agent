@@ -111,6 +111,10 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(latest["stale"])
         history = self.client.get("/api/vision/detections/history?limit=1").json()
         self.assertEqual(len(history["items"]), 1)
+        tracks = self.client.get("/api/vision/tracks/latest").json()
+        self.assertTrue(tracks["available"])
+        track_history = self.client.get("/api/vision/tracks/history?limit=1").json()
+        self.assertEqual(len(track_history["items"]), 1)
 
     def test_websocket_starts_with_metadata_then_detection(self):
         with self.client.websocket_connect("/ws/vision/events") as websocket:

@@ -6,12 +6,8 @@ from collections import deque
 from processors.base import BaseProcessor, ProcessorError
 
 
-BOX_TYPES = (
-    ("body_boxes", 0, "person", "body"),
-    ("head_boxes", 1, "head", "head"),
-    ("face_boxes", 2, "face", "face"),
-    ("hand_boxes", 3, "hand", "hand"),
-)
+BOX_TYPES = (("body_boxes", 0, "person", "body"),)
+IGNORED_BOX_TYPES = ("head_boxes", "face_boxes", "hand_boxes")
 
 
 def _finite_number(value, name):
@@ -106,17 +102,18 @@ def parse_multitask_result(raw, confidence_threshold=0.5, received_at=None,
         "detection_count": len(detections),
         "metadata": {
             "body_count": int(payload.get("body_count", 0) or 0),
-            "head_count": int(payload.get("head_count", 0) or 0),
-            "face_count": int(payload.get("face_count", 0) or 0),
-            "hand_count": int(payload.get("hand_count", 0) or 0),
-            "keypoints_count": int(payload.get("keypoints_count", 0) or 0),
+            "ignored_source_boxes": sum(
+                len(payload.get(field, []))
+                for field in IGNORED_BOX_TYPES
+                if isinstance(payload.get(field, []), list)
+            ),
             "rejected_boxes": rejected,
         },
     }
 
 
 class ObjectDetectionProcessor(BaseProcessor):
-    def __init__(self, config, result_bus, ros_runtime):
+    def __init__(self, config, result_bus, ros_runtime, on_frame=None):
         super().__init__("object_detection", config)
         self.result_bus = result_bus
         self.ros_runtime = ros_runtime
@@ -128,6 +125,7 @@ class ObjectDetectionProcessor(BaseProcessor):
         self.warmup_seconds = float(config.get("warmup_seconds", 3.0))
         self.probe_seconds = float(config.get("probe_existing_stream_seconds", 0.75))
         self.model = config.get("model")
+        self.on_frame = on_frame
         self.owns_source_enable = False
         self.last_raw_at = None
         self.last_raw_monotonic = None
@@ -209,6 +207,8 @@ class ObjectDetectionProcessor(BaseProcessor):
                 self.last_error = {"code": "invalid_source_result", "message": str(error)}
             return None
         published = self.result_bus.publish(event)
+        if self.on_frame is not None:
+            self.on_frame(published)
         with self.lock:
             self.last_result_at = received_at
             self.last_result_monotonic = received_monotonic

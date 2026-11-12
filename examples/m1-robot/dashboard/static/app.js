@@ -9,9 +9,9 @@ const cameraView = {
   timer: null, failures: 0, visionStatusTimer: null, visionResultTimer: null,
   processorState: "unknown", result: null, controlling: false, resizeObserver: null,
 };
-const visionColors = { person: "#22a55c", head: "#2f7fd6", face: "#d98324", hand: "#7a5cd6" };
-const visionLabels = { person: "人体", head: "头部", face: "人脸", hand: "手部" };
-const visionProcessorLabels = { object_detection: "目标检测" };
+const visionColors = { person: "#22a55c" };
+const visionLabels = { person: "人员" };
+const visionProcessorLabels = { object_detection: "人体检测", person_tracking: "人员跟踪" };
 const visionProcessorStateLabels = {
   stopped: "已停止", starting: "启动中", running: "运行中", degraded: "结果流异常", failed: "启动失败",
 };
@@ -143,8 +143,8 @@ function renderVisionServicePanel(data) {
     name.append(nameStrong, state);
     const stream = document.createElement("div"); stream.className = "vision-processor-stream";
     const source = document.createElement("span"); source.textContent = `输入 ${processor.source || "—"}`;
-    const topicLine = document.createElement("span"); topicLine.textContent = `结果 ${processor.result_topic || "—"}`;
-    const model = document.createElement("span"); model.textContent = `模型 ${processor.model || "—"}`;
+    const topicLine = document.createElement("span"); topicLine.textContent = `结果 ${processor.result_topic || processor.result_type || "内部结果总线"}`;
+    const model = document.createElement("span"); model.textContent = `模型/算法 ${processor.model || processor.algorithm || "—"}`;
     stream.append(source, topicLine, model);
     const rate = document.createElement("div"); rate.className = "vision-processor-rate";
     const rateStrong = document.createElement("strong"); rateStrong.textContent = visionProcessorSummary(processor);
@@ -156,7 +156,7 @@ function renderVisionServicePanel(data) {
       const active = ["starting", "running", "degraded"].includes(processor.state);
       action.type = "button"; action.className = `vision-toggle vision-processor-action${active ? " running" : ""}`;
       action.disabled = cameraView.controlling;
-      action.textContent = active ? "停止" : "启动";
+      action.textContent = active ? "停止检测" : "启动检测";
       action.addEventListener("click", () => setVisionDetection(active ? "stop" : "start"));
       item.append(action);
     }
@@ -192,7 +192,11 @@ function drawVisionOverlay() {
     const box = detectionCanvasBox(detection.bbox_normalized, rect);
     if (box.width < 2 || box.height < 2) continue;
     const color = visionColors[detection.label] || "#0d9488";
-    const label = `${visionLabels[detection.label] || detection.label || "目标"} ${(Number(detection.confidence || 0) * 100).toFixed(0)}%`;
+    const trackId = detection.track_id === undefined ? "" : ` #${detection.track_id}`;
+    const label = `${visionLabels[detection.label] || detection.label || "目标"}${trackId} ${(Number(detection.confidence || 0) * 100).toFixed(0)}%`;
+    const lost = detection.track_state === "lost";
+    ctx.globalAlpha = lost ? 0.55 : 1;
+    ctx.setLineDash(lost ? [6, 4] : []);
     ctx.strokeStyle = color; ctx.lineWidth = 2;
     ctx.strokeRect(box.x, box.y, box.width, box.height);
     const labelWidth = Math.ceil(ctx.measureText(label).width) + 10;
@@ -200,6 +204,8 @@ function drawVisionOverlay() {
     ctx.fillStyle = color; ctx.fillRect(box.x, labelY, labelWidth, 20);
     ctx.fillStyle = "#fff"; ctx.fillText(label, box.x + 5, labelY + 3);
   }
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
 }
 
 function refreshCameraPreview() {
@@ -228,13 +234,13 @@ function applyVisionStatus(data) {
   const active = ["starting", "running", "degraded"].includes(cameraView.processorState);
   if (button) {
     button.disabled = !online || cameraView.controlling;
-    button.textContent = cameraView.controlling ? "处理中…" : active ? "停止目标检测" : "启动目标检测";
+    button.textContent = cameraView.controlling ? "处理中…" : active ? "停止人体检测" : "启动人体检测";
     button.classList.toggle("running", active);
   }
   if (dot) dot.className = `vision-dot ${!online ? "offline" : cameraView.processorState === "running" ? "running" : cameraView.processorState === "degraded" ? "degraded" : ""}`;
   if (status) {
     if (!online) status.textContent = "视觉服务离线";
-    else if (cameraView.processorState === "running") status.textContent = `检测运行中 · ${Number(processor.output_rate_hz || 0).toFixed(1)} Hz`;
+    else if (cameraView.processorState === "running") status.textContent = `人体检测与跟踪运行中 · ${Number(processor.output_rate_hz || 0).toFixed(1)} Hz`;
     else if (cameraView.processorState === "degraded") status.textContent = "检测结果流异常";
     else status.textContent = "视觉服务在线 · 检测已停止";
   }
@@ -254,7 +260,7 @@ async function refreshVisionStatus() {
 async function refreshVisionDetections() {
   if (!["starting", "running", "degraded"].includes(cameraView.processorState)) return;
   try {
-    const response = await fetch(`/api/vision/detections/latest?t=${Date.now()}`, { cache: "no-store" });
+    const response = await fetch(`/api/vision/tracks/latest?t=${Date.now()}`, { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok || !visionResultUsable(payload)) {
       cameraView.result = null;
@@ -262,7 +268,8 @@ async function refreshVisionDetections() {
       return;
     }
     cameraView.result = payload.result;
-    text("vision-result-summary", `${payload.result.detection_count || 0} 个目标 · ${Math.round((payload.age_seconds || 0) * 1000)} ms`);
+    const confirmed = payload.result.confirmed_track_count ?? payload.result.track_count ?? payload.result.detection_count ?? 0;
+    text("vision-result-summary", `${confirmed} 人 · 跟踪结果 ${Math.round((payload.age_seconds || 0) * 1000)} ms`);
     drawVisionOverlay();
   } catch (_error) {
     cameraView.result = null;

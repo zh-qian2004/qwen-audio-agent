@@ -55,6 +55,19 @@ class VisionClientTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertTrue(data["stale"])
 
+    def test_tracks_use_tracking_endpoint(self):
+        calls = []
+
+        def transport(method, path, payload, timeout):
+            calls.append((method, path, payload, timeout))
+            return response(200, {"available": True, "result": {"tracks": []}})
+
+        client = VisionServiceClient(self.config(), transport)
+        code, data = client.latest_tracks()
+        self.assertEqual(code, 200)
+        self.assertTrue(data["available"])
+        self.assertEqual(calls[0][1], "/api/vision/tracks/latest")
+
     def test_control_uses_fixed_processor_path(self):
         calls = []
 

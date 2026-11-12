@@ -221,14 +221,14 @@
           <div class="card-label">RGB 相机实时画面 <span id="camera-preview-status" class="inline-status">加载中</span></div>
           <div class="vision-toolbar">
             <div><span class="vision-dot" id="vision-dot"></span><span id="vision-status">正在检查视觉服务</span></div>
-            <button class="vision-toggle" id="vision-toggle" type="button" disabled>启动目标检测</button>
+            <button class="vision-toggle" id="vision-toggle" type="button" disabled>启动人体检测</button>
           </div>
           <div class="camera-stage" id="camera-stage">
             <img id="camera-preview" alt="RGB 相机实时画面">
-            <canvas id="detection-overlay" aria-label="目标检测标注"></canvas>
+            <canvas id="detection-overlay" aria-label="人体检测与跟踪标注"></canvas>
           </div>
           <div class="vision-legend" id="vision-legend">
-            <span class="person">人体</span><span class="head">头部</span><span class="face">人脸</span><span class="hand">手部</span>
+            <span class="person">人员（短时跟踪 ID）</span>
             <b id="vision-result-summary">检测未启动</b>
           </div>
         </article>

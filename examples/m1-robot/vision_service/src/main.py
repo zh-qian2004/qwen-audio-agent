@@ -31,6 +31,9 @@ def load_config():
     for key in ("result_topic", "enable_topic"):
         if not str(processor.get(key, "")).startswith("/"):
             raise ValueError(f"object_detection.{key} must be an absolute ROS topic")
+    tracking = config.get("processors", {}).get("person_tracking")
+    if not isinstance(tracking, dict):
+        raise ValueError("processors.person_tracking is required")
     return config
 
 
@@ -121,6 +124,16 @@ async def latest_detection():
 
 @app.get("/api/vision/detections/history")
 async def detection_history(limit: int = Query(20, ge=1, le=100)):
+    return {"items": SERVICE.bus.recent(limit)}
+
+
+@app.get("/api/vision/tracks/latest")
+async def latest_tracks():
+    return await latest_detection()
+
+
+@app.get("/api/vision/tracks/history")
+async def track_history(limit: int = Query(20, ge=1, le=100)):
     return {"items": SERVICE.bus.recent(limit)}
 
 

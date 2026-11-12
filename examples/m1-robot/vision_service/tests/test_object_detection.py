@@ -51,11 +51,11 @@ class ParserTests(unittest.TestCase):
         event = parse_multitask_result(json.dumps(SAMPLE), 0.5, received_at=100,
                                        received_monotonic=50, model="test.hbm")
         self.assertEqual(event["source_frame_sequence"], 42)
-        self.assertEqual(event["detection_count"], 2)
+        self.assertEqual(event["detection_count"], 1)
         self.assertEqual(event["detections"][0]["label"], "person")
         self.assertEqual(event["detections"][0]["bbox_normalized"]["x1"], 0.010417)
-        self.assertEqual(event["detections"][1]["bbox"]["x2"], 960.0)
-        self.assertEqual(event["detections"][1]["bbox"]["y2"], 544.0)
+        self.assertEqual(event["metadata"]["ignored_source_boxes"], 1)
+        self.assertNotIn("head", [item["label"] for item in event["detections"]])
 
     def test_rejects_invalid_payload(self):
         with self.assertRaises(ValueError):
@@ -104,7 +104,7 @@ class ProcessorTests(unittest.TestCase):
         processor = ObjectDetectionProcessor(self.config(manage_source_enable=False), bus, runtime)
         processor.start()
         processor.handle_raw_result(json.dumps(SAMPLE), 100, time.monotonic())
-        self.assertEqual(bus.latest_result()["detection_count"], 2)
+        self.assertEqual(bus.latest_result()["detection_count"], 1)
         self.assertEqual(processor.status()["output_frames"], 1)
 
     def test_stopped_processor_observes_source_without_publishing(self):

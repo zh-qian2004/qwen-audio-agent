@@ -122,6 +122,16 @@ class VisionServiceClient:
                 "error": {"code": "vision_service_unavailable", "message": str(error)},
             }
 
+    def latest_tracks(self):
+        try:
+            return self._call("GET", "/api/vision/tracks/latest")
+        except VisionServiceTransportError as error:
+            return 503, {
+                "available": False,
+                "stale": True,
+                "error": {"code": "vision_service_unavailable", "message": str(error)},
+            }
+
     def control_detection(self, action):
         if action not in ("start", "stop"):
             raise ValueError("action must be start or stop")

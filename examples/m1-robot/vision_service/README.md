@@ -1,21 +1,22 @@
 # vision_service — M1 视觉能力网关
 
 `vision_service` 是独立于 Dashboard、Agent 和厂商视觉插件的二次开发视觉能力网关。
-目标检测是第一个生产 Processor；后续的人脸、姿态、OCR、分割和跟踪能力在相同边界内扩展。
+人体检测与短时人员跟踪是首批生产 Processor；后续的 OCR、分割和场景能力在相同边界内扩展。
 
 服务的核心原则是：**统一控制面和结果面，原始图像数据面就近直连**。它不会成为集中复制原始
 视频帧的 Python 总线，也不会接管厂商 `media_video`。
 
 ## 1. 当前能力
 
-- `object_detection` Processor：复用厂商已经运行在 X5 BPU 上的多任务检测模型。
+- `object_detection` Processor：复用厂商已经运行在 X5 BPU 上的多任务检测模型，但只接收和输出人体框。
+- `person_tracking` Processor：在 CPU 上用 IoU、中心距离和运动预测为人员分配短时稳定 `track_id`。
 - 输入：`/vision/multitask_result`（`std_msgs/msg/String` JSON）。
 - 开关：`/vision/multitask_detect_flag`（`std_msgs/msg/Int32`，`1` 开、`0` 关）。
-- 类别：`person`、`head`、`face`、`hand`。
+- 对外类别只有 `person`；头部、人脸和手部框在适配层直接丢弃，不进入结果总线。
 - 坐标：厂商模型 960×544 像素坐标，同时输出归一化坐标。
-- 输出：统一 DetectionFrame、最近结果、有限历史和 WebSocket 事件流。
+- 输出：人体 DetectionFrame、TrackingFrame、最近结果、有限历史和 WebSocket 事件流。
 - 指标：输入/输出 FPS、丢弃/解析错误、结果年龄、CPU/RSS、BPU 利用率和频率。
-- Processor 默认不自动启动，避免机器人启动后无条件增加 BPU 负载。
+- 人体检测默认不自动启动，避免机器人启动后无条件增加 BPU 负载；跟踪器随服务启动但没有图像推理。
 
 现有厂商 80 类 `scene_tag` 模型只对外提供 `Int32MultiArray` 场景标签，未提供通用检测框，
 因此第一版没有把它伪装成通用目标检测。以后接入自研 80 类 BPU Processor 时，可以保持
@@ -29,7 +30,10 @@
        └→ 厂商 multitask BPU → /vision/multitask_result
                                       │
                               object_detection
-                              解析 / 过滤 / 标准化
+                         只保留 person / 标准化
+                                      │
+                               person_tracking
+                       ID / 平滑 / 方向 / 进入离开事件
                                       │
                                  ResultBus
                             latest + bounded history
@@ -65,7 +69,7 @@
 这能避免常见的“观察者关闭了其他模块正在使用的检测”问题，但厂商接口没有真正的跨进程
 引用计数。如果未来多个二次开发服务都需要控制该模型，应将开关仲裁完全收口到本服务。
 
-## 4. DetectionFrame
+## 4. DetectionFrame 与 TrackingFrame
 
 ```json
 {
@@ -93,6 +97,31 @@
 }
 ```
 
+DetectionFrame 只包含 `person`。它进入 `person_tracking` 后转换为 TrackingFrame；为兼容既有
+Dashboard，TrackingFrame 同时提供同内容的 `tracks` 和 `detections` 数组：
+
+```json
+{
+  "type": "tracking_frame",
+  "processor": "person_tracking",
+  "track_count": 1,
+  "confirmed_track_count": 1,
+  "tracks": [{
+    "track_id": 12,
+    "label": "person",
+    "track_state": "confirmed",
+    "direction": "right",
+    "velocity": {"x": 0.08, "y": 0.01, "unit": "normalized_per_second"},
+    "bbox_normalized": {"x1": 0.12, "y1": 0.1, "x2": 0.42, "y2": 0.9}
+  }],
+  "events": [{"type": "person_entered", "track_id": 12}]
+}
+```
+
+轨迹状态为 `tentative / confirmed / lost`。连续命中两帧后确认，短时漏检时保留并预测；默认
+连续丢失 10 帧后移除并产生 `person_left`。`track_id` 只保证当前连续视频片段内的短时稳定，
+不用于跨时段身份识别。
+
 厂商消息目前只有 `frame_seq`，没有 ROS Header 时间戳，因此 `source_timestamp` 明确为 `null`；
 `received_at` 是本服务收到结果的墙钟时间。Dashboard 后续叠框时必须结合结果年龄做过期隐藏，
 不能声称它与 JPEG 帧具有严格的逐帧同步关系。
@@ -108,8 +137,10 @@
 | GET | `/api/vision/processors` | Processor 列表与状态 |
 | POST | `/api/vision/processors/object_detection/start` | 幂等启动目标检测 |
 | POST | `/api/vision/processors/object_detection/stop` | 幂等停止目标检测 |
-| GET | `/api/vision/detections/latest` | 最新检测及年龄/过期标记 |
+| GET | `/api/vision/detections/latest` | 最新跟踪结果及年龄/过期标记（兼容路径） |
 | GET | `/api/vision/detections/history?limit=20` | 有界历史 |
+| GET | `/api/vision/tracks/latest` | 最新人员跟踪结果 |
+| GET | `/api/vision/tracks/history?limit=20` | 人员跟踪有界历史 |
 | WS | `/ws/vision/events` | 最新优先事件流，5 秒心跳 |
 
 服务不接受任意 Processor 名称、模型路径、ROS 话题或 shell 命令。Processor 只能来自配置白名单。
@@ -128,6 +159,9 @@
 | `source_stale_after_seconds` | 1.0 | 厂商结果流在线阈值 |
 | `probe_existing_stream_seconds` | 0.75 | 启动前观察已有流的时间 |
 | `manage_source_enable` | true | 是否管理厂商 0/1 开关 |
+| `person_tracking.min_confirmed_hits` | 2 | 轨迹确认需要的连续命中数 |
+| `person_tracking.max_missed_frames` | 10 | 移除轨迹前允许连续漏检的帧数 |
+| `person_tracking.iou_threshold` | 0.2 | 检测框与轨迹的最小 IoU 匹配阈值 |
 
 ## 7. 本地测试
 
@@ -144,8 +178,8 @@ python -m py_compile src\*.py src\processors\*.py
 /userdata/vision_service/scripts/test.sh
 ```
 
-测试覆盖 JSON 解析、阈值过滤、越界裁剪、标准化坐标、非法消息、ResultBus 有界历史、
-等待唤醒、Processor 幂等启停和源开关所有权。
+测试覆盖 JSON 解析、人体框过滤、越界裁剪、标准化坐标、非法消息、ResultBus 有界历史、
+轨迹确认/丢失/移除、多人顺序变化、稳定 ID、Processor 联动和源开关所有权。
 
 ## 8. 机器人部署
 
@@ -205,9 +239,18 @@ busybox wget -qO- --post-data='' \
 | 标准化结果频率 | 0 Hz | 约 10 Hz |
 | 解析错误 | 0 | 0 |
 
-实测结果包含 `person/head/face/hand` 检测框，坐标被正确限制在 960×544 模型范围内。
-停止 Processor 后 BPU 回到 0%，ROS Runtime 和 HTTP 服务保持在线。最终交付状态为：
-`vision_service` 正在运行，`object_detection` 为 `stopped`，不会持续占用 BPU。
+该表为 0.1.0 版本基线。停止 Processor 后 BPU 回到 0%，ROS Runtime 和 HTTP 服务保持在线。
+
+### 0.2.0 人员跟踪验收（2026-11-11）
+
+- `object_detection` 与 `person_tracking` 均稳定输出约 10 Hz，解析错误为 0。
+- 连续实机采样只出现 `person`，头部、人脸和手部框没有进入公开结果。
+- 当前画面中的人员在连续帧保持同一 `track_id=1`；Dashboard 取得 `tracking_frame`。
+- vision_service RSS 约 88.5 MiB；健康接口连续采样 CPU 通常约 16–19% 单核，短采样峰值约 33%。
+- 验收时整机 BPU 指标约 12–14%；该数值包含设备上其他厂商 BPU 用户，不能全部归因于跟踪器。
+- 跟踪器本身不读取图像、不运行神经网络，只处理结构化框，因此不增加 BPU 推理。
+
+最终交付状态：`vision_service 0.2.0`、人体检测和人员跟踪均正在运行。
 
 ## 11. 回滚
 

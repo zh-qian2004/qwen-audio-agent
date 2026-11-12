@@ -16,8 +16,8 @@
 | 关节状态 | 20 路关节名称、角度（°）、速度（MCU 原始值）、电流/负载/温度/错误反馈、数据年龄、stale/offline 状态、60 秒角度曲线；按头部、左臂、右臂、左腿、右腿分组 |
 | 姿态与 IMU | Roll/Pitch/Yaw、角速度（rad/s）、线加速度（m/s²）、人工地平线可视化、60 秒姿态曲线 |
 | 电池与底盘 | 电量 SOC、电压、充电状态、底板电压、车轮速度/里程、通信状态与故障码 |
-| 音视频流 | RGB 相机实时画面（约 2 fps，服务端只保留最新一帧）；通过 `vision_service` 启停目标检测并用浏览器 Canvas 叠加人体/头部/人脸/手部检测框；厂商 `media_audio` 共享 PCM 的实时电平、峰值和历史曲线；提供 Agent WebSocket 音频入口 |
-| Video Service | 独立导航页，自动展示 `vision_service` 当前注册的各个 Processor、模型、数据流、帧率、累计结果、ROS/结果总线以及 CPU/内存/BPU 开销；可启停目标检测 Processor |
+| 音视频流 | RGB 相机实时画面（约 2 fps，服务端只保留最新一帧）；通过 `vision_service` 启停人体检测并叠加带短时稳定 `track_id` 的人员框；厂商 `media_audio` 共享 PCM 的实时电平、峰值和历史曲线；提供 Agent WebSocket 音频入口 |
+| Video Service | 独立导航页，展示人体检测与人员跟踪 Processor、模型/算法、数据流、帧率、活跃轨迹及 CPU/内存/BPU 开销；可启停人体检测 Processor |
 | 传感器健康 | LiDAR、iTOF、RGB 相机、麦克风/音频的在线状态、话题频率、发布者数量、最后更新时间 |
 | ROS 2 图 | 实际运行节点列表、监控话题的类型、频率、数据年龄与状态（每 2 秒刷新） |
 
@@ -144,6 +144,7 @@ ssh -N -L 8080:127.0.0.1:8080 root@192.168.137.228
 | `GET /api/camera/frame` | 最新一帧相机 JPEG（无数据时返回 503） |
 | `GET /api/vision/status` | 代理 `vision_service` 状态与 Processor 指标 |
 | `GET /api/vision/detections/latest` | 最新标准化检测框及结果年龄 |
+| `GET /api/vision/tracks/latest` | 最新人员跟踪结果、稳定 `track_id`、方向和轨迹状态 |
 | `POST /api/vision/processors/object_detection/start` | 启动白名单目标检测 Processor |
 | `POST /api/vision/processors/object_detection/stop` | 停止目标检测 Processor |
 | `GET /api/audio/level` | 代理 `audio_service`：处理后 PCM 的 RMS 电平、峰值、流格式、数据帧与音量历史；`audio_service` 离线时返回 503 + `error_code=audio_service_unavailable` |

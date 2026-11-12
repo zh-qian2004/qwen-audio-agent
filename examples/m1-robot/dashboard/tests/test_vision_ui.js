@@ -34,6 +34,15 @@ test("only fresh available detection payloads are drawable", () => {
   assert.equal(run("visionResultUsable({available:false})"), false);
 });
 
+test("dashboard fetches tracked people instead of raw body parts", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
+  assert.match(source, /\/api\/vision\/tracks\/latest/);
+  assert.match(source, /person_tracking: "人员跟踪"/);
+  assert.match(source, /detection\.track_id/);
+  assert.doesNotMatch(html, /class="head">头部|class="face">人脸|class="hand">手部/);
+});
+
 test("camera markup includes overlay and detection controls", () => {
   const html = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
   for (const id of ["camera-stage", "detection-overlay", "vision-toggle", "vision-status", "vision-service-pill", "vision-processor-list"]) {

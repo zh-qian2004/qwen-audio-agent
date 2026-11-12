@@ -159,6 +159,55 @@ test('bounded movement returns immediately and delegates its deadline to Dashboa
   assert.match(result.output.user_message_rule, /started/)
 })
 
+test('background tool catalog waits for the exact motion operation before replanning', async () => {
+  const dashboard = fakeDashboard()
+  const statuses = [
+    {
+      command: { request_id: 'op-move_forward', command_id: 'move_forward', phase: 'observing' },
+      robot: { control_mode: 1, locomotion_mode: 'walking' },
+    },
+    {
+      command: { request_id: 'op-move_forward', command_id: 'move_forward', phase: 'completed' },
+      robot: { control_mode: 0, locomotion_mode: 'idle' },
+    },
+  ]
+  dashboard.motionStatus = async () => statuses.shift() || statuses.at(-1)
+  const tools = new M1RobotTools({ dashboard, delay: async () => {} })
+  await tools.initialize()
+  assert.equal(tools.definitions().some(item => item.name === 'm1_wait_for_motion'), false)
+  assert.equal(
+    tools.definitions({ includeBackgroundTools: true })
+      .some(item => item.name === 'm1_wait_for_motion'),
+    true,
+  )
+  const backgroundMove = tools.definitions({ includeBackgroundTools: true })
+    .find(item => item.name === 'm1_move')
+  assert.doesNotMatch(backgroundMove.description, /先用一句极短口语确认/)
+  const result = await tools.handle({
+    name: 'm1_wait_for_motion',
+    arguments: { operation_id: 'op-move_forward', timeout_ms: 1_000 },
+  })
+  assert.equal(result.status, 'completed')
+  assert.equal(result.output.terminal, true)
+  assert.equal(result.output.completion_confirmed, true)
+  assert.equal(result.output.outcome, 'completed')
+})
+
+test('motion waiter reports when another operation supersedes its target', async () => {
+  const dashboard = fakeDashboard(undefined, {
+    command: { request_id: 'op-new', command_id: 'motion_stop', phase: 'observing' },
+  })
+  const tools = new M1RobotTools({ dashboard })
+  await tools.initialize()
+  const result = await tools.handle({
+    name: 'm1_wait_for_motion', arguments: { operation_id: 'op-old' },
+  })
+  assert.equal(result.status, 'completed')
+  assert.equal(result.output.outcome, 'superseded')
+  assert.equal(result.output.current_operation_id, 'op-new')
+  assert.equal(result.output.completion_confirmed, false)
+})
+
 test('movement owns its precheck and action tools request immediate spoken acknowledgement', async () => {
   const tools = new M1RobotTools({ dashboard: fakeDashboard(), maxMoveMs: 250 })
   await tools.initialize()
@@ -166,11 +215,13 @@ test('movement owns its precheck and action tools request immediate spoken ackno
 
   assert.match(definitions.get('m1_move').description, /不要预先调用 m1_get_vehicle_status 或 m1_get_state/)
   assert.match(definitions.get('m1_get_vehicle_status').description, /普通前进、后退、横移或转向不要先调用/)
+  assert.match(definitions.get('m1_get_state').description, /禁止把本工具用作任何动作的前置检查/)
   for (const name of [
     'm1_move', 'm1_execute_action', 'm1_mount_cart', 'm1_dismount_cart',
     'm1_return_to_charging_dock', 'm1_leave_charging_dock',
   ]) {
     assert.match(definitions.get(name).description, /同一响应中立即调用工具/)
+    assert.match(definitions.get(name).description, /禁止预先调用 m1_get_state/)
   }
 })
 
@@ -233,14 +284,14 @@ test('charging interlock blocks locomotion before the vendor command', async () 
   assert.deepEqual(dashboard.calls, [])
 })
 
-test('wheel mode blocks rotate and strafe before the Dashboard command', async () => {
+test('wheel mode blocks rotate before the Dashboard command', async () => {
   const dashboard = fakeDashboard({
     battery: { power: 80, is_charging: false, on_charger_raw: 0 },
     business: { is_on_car: 1 },
   })
   const tools = new M1RobotTools({ dashboard, maxMoveMs: 250 })
   await tools.initialize()
-  for (const direction of ['rotate_left', 'rotate_right', 'strafe_left', 'strafe_right']) {
+  for (const direction of ['rotate_left', 'rotate_right']) {
     const result = await tools.handle({
       name: 'client.tool.m1_move', arguments: { direction, duration_ms: 200 },
     })
@@ -253,23 +304,25 @@ test('wheel mode blocks rotate and strafe before the Dashboard command', async (
   assert.deepEqual(dashboard.calls, [])
 })
 
-test('wheel mode still permits forward and backward movement', async () => {
+test('wheel mode permits forward, backward, and lateral movement', async () => {
   const dashboard = fakeDashboard({
     battery: { power: 80, is_charging: false, on_charger_raw: 0 },
     business: { is_on_car: 1 },
   })
   const tools = new M1RobotTools({ dashboard, maxMoveMs: 250 })
   await tools.initialize()
-  for (const direction of ['forward', 'backward']) {
+  for (const direction of ['forward', 'backward', 'strafe_left', 'strafe_right']) {
     const result = await tools.handle({
       name: 'client.tool.m1_move', arguments: { direction, duration_ms: 200 },
     })
     assert.equal(result.status, 'completed')
   }
-  assert.deepEqual(dashboard.calls.map(call => call[1]), ['move_forward', 'move_backward'])
+  assert.deepEqual(dashboard.calls.map(call => call[1]), [
+    'move_forward', 'move_backward', 'strafe_left', 'strafe_right',
+  ])
 })
 
-test('unknown mount state fails closed for rotate and strafe movement', async () => {
+test('unknown mount state fails closed for rotate movement', async () => {
   const dashboard = fakeDashboard({
     battery: { power: 80, is_charging: false, on_charger_raw: 0 },
   })

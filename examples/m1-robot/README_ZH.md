@@ -24,6 +24,7 @@
 audio_service /ws/audio/input ──PCM16/16k──► M1 Connector ──GCP──► Gateway
 audio_service /ws/audio/output ◄──PCM16/24k── M1 Connector ◄─audio.delta─ Gateway
 Dashboard HTTP API             ◄──client tools── M1 Connector ◄────────── Gateway
+Dashboard HTTP API             ◄────M1 MCP tools──── 后台 Agent ◄──────── Gateway
 Dashboard Agent heartbeat      ◄──status/2s───── M1 Connector ──health──► Gateway
 vision_service                 ◄────────Dashboard / Agent tools──────────►
 ```
@@ -77,8 +78,9 @@ npm run start:m1-robot
 1. 检查 `audio_service` 和 Dashboard，需要时建立 SSH 隧道。
 2. 构建并启动本地 Gateway，或复用 profile 为 `m1-robot` 的现有 Gateway。
 3. 等待 Gateway 就绪后启动 M1 Connector。
-4. 每 2 秒向 Dashboard 上报 Gateway、前台模型、后台 Agent 和音频桥状态。
-5. 在托管进程退出或收到 `Ctrl+C` 时清理本次创建的进程。
+4. 把 M1 MCP 注入后台 Agent，使开放任务能够持续调用机器人原子工具。
+5. 每 2 秒向 Dashboard 上报 Gateway、前台模型、后台 Agent 和音频桥状态。
+6. 在托管进程退出或收到 `Ctrl+C` 时清理本次创建的进程。
 
 机器地址、SSH key、端口或模型环境不同的使用者，应复制本地配置：
 
@@ -130,6 +132,10 @@ Tailscale 隧道转发 `8091` 和 `8080`。长期部署可把 Connector 与 Gate
 - `m1_emergency_stop`
 - `m1_set_volume`
 
+后台 Agent 还会获得 `m1_wait_for_motion`。它按 `operation_id` 等待动作进入终态，防止
+后台在物理动作尚未完成时提前进行下一次观察或控制。这个等待工具不暴露给实时前台，
+避免占用语音模型的实时响应通道。
+
 动作目录由 Connector 启动时从 Dashboard 发现。`m1_execute_action` 只暴露已启用、
 非 hold、无需额外确认的动作；方向运动统一由 `m1_move` 提交，计时和自动停止由
 Dashboard 持有。
@@ -137,6 +143,25 @@ Dashboard 持有。
 运动命令返回 `operation_id`、`execution_state` 和 `completion_confirmed`。厂商 HTTP
 受理不等于物理动作已经完成；`completion_confirmed=false` 时必须通过
 `m1_get_motion_status` 继续观察 ROS 反馈。
+
+## 开放任务
+
+“找人”“移动直到看见人”“巡视并报告异常”等请求由实时前台通过现有
+`spawn_thinking` 交给后台 Agent。后台不调用预定义的 `find_person` 工作流，而是使用
+通用闭环：
+
+```text
+观察状态/视觉 → 选择一个有限动作 → 等待该 operation_id 结束 → 再观察 → 重规划
+```
+
+后台 MCP 与前台 Connector 复用同一套 `M1RobotTools` 和 Dashboard 安全门控。每次移动
+仍受 Dashboard 的有限时长和自动停止保护；后台只有在视觉或状态证据确认目标后才能
+报告成功。用户可通过现有任务工具查询、调整或取消后台任务，取消物理任务时前台同时
+调用 `m1_stop`。
+
+一键启动器只会把 MCP 注入它新启动的 Gateway。若复用已经运行的 Gateway，需要先
+重启该 Gateway，才能让新的后台 Session 获得 M1 工具。分步启动时可通过
+`QWEN_AUDIO_BACKEND_MCP_SERVERS` 传入同等的 stdio MCP 描述。
 
 ## 音频行为
 

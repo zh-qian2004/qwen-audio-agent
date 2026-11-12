@@ -1,6 +1,6 @@
 import { DashboardError, enabledCommands } from './dashboard-client.mjs'
 
-const ACTION_ACK = '调用本工具时，先用一句极短口语确认（如“好，我现在执行”），并在同一响应中立即调用工具，不要等工具结果才开始说话。'
+const ACTION_ACK = '用户明确要求执行本动作时，禁止预先调用 m1_get_state、m1_get_motion_status、m1_get_vehicle_status 或其他状态查询工具；安全预检查由本动作工具和 Dashboard 内部完成。先用一句极短口语确认（如“好，我现在执行”），并在同一响应中立即调用工具，不要等工具结果才开始说话。'
 
 const MOVE_IDS = Object.freeze({
   forward: 'move_forward',
@@ -12,7 +12,12 @@ const MOVE_IDS = Object.freeze({
 })
 
 const WHEELED_UNSUPPORTED_DIRECTIONS = new Set([
-  'strafe_left', 'strafe_right', 'rotate_left', 'rotate_right',
+  'rotate_left', 'rotate_right',
+])
+
+const TERMINAL_MOTION_PHASES = new Set([
+  'completed', 'timed_out', 'vendor_rejected', 'connection_failed',
+  'state_mismatch', 'cancelled',
 ])
 
 const VEHICLE_ACTIONS = Object.freeze({
@@ -233,10 +238,11 @@ function summarizeDetections(payload) {
 }
 
 export class M1RobotTools {
-  constructor({ dashboard, maxMoveMs = 3_000 } = {}) {
+  constructor({ dashboard, maxMoveMs = 3_000, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
     if (!dashboard) throw new TypeError('dashboard is required')
     this.dashboard = dashboard
     this.maxMoveMs = maxMoveMs
+    this.delay = delay
     this.commands = []
     this.safeActionIds = []
     this.moveDirections = []
@@ -262,7 +268,7 @@ export class M1RobotTools {
     return capabilities
   }
 
-  definitions() {
+  definitions({ includeBackgroundTools = false } = {}) {
     const actionSchema = {
       type: 'object',
       properties: {
@@ -277,7 +283,7 @@ export class M1RobotTools {
       additionalProperties: false,
     }
     const definitions = [
-      tool('m1_get_state', '查询 M1 机器人的当前电量、姿态、传感器、运动和故障状态。状态问题直接调用。'),
+      tool('m1_get_state', '查询 M1 机器人的当前电量、姿态、传感器、运动和故障状态。仅在用户明确询问当前状态时调用；禁止把本工具用作任何动作的前置检查，动作工具会自行完成安全预检查。'),
       tool('m1_get_motion_status', '查询当前运动命令、急停和运动观测。M1 可处于步态或轮式模式：步态模式下轮速不适用；“遥测未确认”不代表机器人没有移动。'),
       tool('m1_get_vehicle_status', '仅当用户明确询问小车、在车、车轮、里程、电流、故障或充电桩状态时调用。普通前进、后退、横移或转向不要先调用本工具，也不要先调用 m1_get_state；m1_move 自己完成安全预检查。'),
       tool('m1_get_vision_status', '查询 M1 视觉服务、目标检测模型和结果流是否正常。该工具不返回原始图像。'),
@@ -315,7 +321,7 @@ export class M1RobotTools {
     }
     if (this.moveDirections.length) {
       definitions.splice(this.safeActionIds.length ? 4 : 3, 0,
-        tool('m1_move', `${ACTION_ACK}普通方向移动直接调用本工具，不要预先调用 m1_get_vehicle_status 或 m1_get_state；本工具内部完成充电和在车模式安全预检查。轮式小车模式只支持前进和后退，原地左右转及横向移动会被拒绝。Dashboard 按 duration_ms 在后台自动停止。厂商受理后立即返回；completion_confirmed=false 时只能说已开始运动。步态模式下轮速为 0 不是失败。`, {
+        tool('m1_move', `${ACTION_ACK}普通方向移动直接调用本工具，不要预先调用 m1_get_vehicle_status 或 m1_get_state；本工具内部完成充电和在车模式安全预检查。轮式小车模式支持前进、后退及向左/向右平移，但原地左右转会被拒绝。Dashboard 按 duration_ms 在后台自动停止。厂商受理后立即返回；completion_confirmed=false 时只能说已开始运动。步态模式下轮速为 0 不是失败。`, {
           type: 'object',
           properties: {
             direction: { type: 'string', enum: this.moveDirections },
@@ -325,6 +331,23 @@ export class M1RobotTools {
           required: ['direction'],
           additionalProperties: false,
         }))
+    }
+    if (includeBackgroundTools) {
+      for (const definition of definitions) {
+        if (definition.description.startsWith(ACTION_ACK)) {
+          definition.description = definition.description.slice(ACTION_ACK.length)
+        }
+      }
+      definitions.push(tool('m1_wait_for_motion', '等待指定 M1 运动操作进入终态，并返回最终运动观测。开放任务中每次调用 m1_move 或运动动作后都应先等待完成，再进行下一次视觉或状态观察。', {
+        type: 'object',
+        properties: {
+          operation_id: { type: 'string', minLength: 1, description: 'm1_move 或动作工具返回的 operation_id' },
+          timeout_ms: { type: 'integer', minimum: 200, maximum: 30_000, default: 10_000 },
+          poll_interval_ms: { type: 'integer', minimum: 100, maximum: 1_000, default: 250 },
+        },
+        required: ['operation_id'],
+        additionalProperties: false,
+      }))
     }
     return definitions
   }
@@ -343,6 +366,7 @@ export class M1RobotTools {
       else if (name === 'm1_execute_action') output = await this.#executeAction(args)
       else if (Object.hasOwn(VEHICLE_ACTIONS, name)) output = await this.#executeVehicleAction(name, args)
       else if (name === 'm1_move') output = await this.#move(args)
+      else if (name === 'm1_wait_for_motion') output = await this.#waitForMotion(args)
       else if (name === 'm1_stop') output = await this.stopActive('user requested stop')
       else if (name === 'm1_emergency_stop') output = await this.#emergencyStop(args)
       else if (name === 'm1_set_volume') output = await this.#setVolume(args)
@@ -415,20 +439,20 @@ export class M1RobotTools {
       if (!mount.known) {
         throw new DashboardError(
           'motion_mode_unavailable',
-          '无法确认机器人是否处于轮式小车模式，未执行转向或横移。请检查在车状态后重试。',
+          '无法确认机器人是否处于轮式小车模式，未执行原地转向。请检查在车状态后重试。',
           { detail: { executed: false, blocked_by: 'mount_state_unknown', mount } },
         )
       }
       if (mount.onVehicle) {
         throw new DashboardError(
           'unsupported_in_wheeled_mode',
-          '轮式小车模式暂不支持原地左右转或横向移动，未执行命令。请先下车切换到双足模式。',
+          '轮式小车模式暂不支持原地左右转，未执行命令。请先下车切换到双足模式。',
           {
             detail: {
               executed: false,
               blocked_by: 'wheeled_mode',
               direction,
-              user_message: '我当前在轮式小车上，暂不支持原地左右转或横向移动。请先让我下车切换到双足模式。',
+              user_message: '我当前在轮式小车上，暂不支持原地左右转。可以让我向左或向右平移，或者先下车切换到双足模式。',
               mount,
             },
           },
@@ -456,6 +480,51 @@ export class M1RobotTools {
           },
         },
       )
+    }
+  }
+
+  async #waitForMotion(args) {
+    const operationId = String(args.operation_id || '').trim()
+    if (!operationId) throw new DashboardError('invalid_operation_id', 'operation_id is required')
+    const timeoutMs = Math.min(30_000, Math.max(200, Number(args.timeout_ms) || 10_000))
+    const pollIntervalMs = Math.min(1_000, Math.max(100, Number(args.poll_interval_ms) || 250))
+    const deadline = Date.now() + timeoutMs
+    let status
+    do {
+      status = await this.dashboard.motionStatus()
+      const command = status?.command && typeof status.command === 'object' ? status.command : null
+      const currentOperationId = command?.request_id || command?.operation_id || null
+      if (currentOperationId && currentOperationId !== operationId) {
+        return {
+          operation_id: operationId,
+          terminal: true,
+          completion_confirmed: false,
+          outcome: 'superseded',
+          current_operation_id: currentOperationId,
+          motion_status: summarizeMotionStatus(status),
+        }
+      }
+      const phase = command?.phase || null
+      if (phase && TERMINAL_MOTION_PHASES.has(phase)) {
+        return {
+          operation_id: operationId,
+          terminal: true,
+          completion_confirmed: phase === 'completed',
+          outcome: phase,
+          error: command?.error || null,
+          motion_status: summarizeMotionStatus(status),
+        }
+      }
+      if (Date.now() >= deadline) break
+      await this.delay(Math.min(pollIntervalMs, Math.max(0, deadline - Date.now())))
+    } while (Date.now() <= deadline)
+    return {
+      operation_id: operationId,
+      terminal: false,
+      completion_confirmed: false,
+      outcome: 'wait_timed_out',
+      timeout_ms: timeoutMs,
+      motion_status: summarizeMotionStatus(status),
     }
   }
 

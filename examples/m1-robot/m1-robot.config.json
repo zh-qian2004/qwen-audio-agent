@@ -13,6 +13,11 @@
         "remotePort": 8091
       },
       {
+        "localPort": 18093,
+        "remoteHost": "127.0.0.1",
+        "remotePort": 8093
+      },
+      {
         "localPort": 18080,
         "remoteHost": "127.0.0.1",
         "remotePort": 8080
@@ -38,6 +43,8 @@
     "locale": "zh-CN",
     "timeZone": "Asia/Shanghai",
     "preflightTimeoutMs": 20000,
-    "environment": {}
+    "environment": {
+      "M1_AUDIO_INPUT_URL": "ws://127.0.0.1:18093/ws/audio/input?delivery=continuous&pre_roll_ms=0"
+    }
   }
 }

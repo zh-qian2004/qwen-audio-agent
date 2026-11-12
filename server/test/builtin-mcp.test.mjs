@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   builtinMcpServers,
   computerUseMcpServer,
+  configuredBackendMcpServers,
   createBuiltinMcpLifecycle,
 } from '../src/backend/adapters/acp/builtin-mcp.mjs'
 
@@ -46,6 +47,31 @@ test('builtinMcpServers returns descriptor list and filters disabled entries', (
 
   const disabled = builtinMcpServers({ QWEN_AUDIO_AGENT_COMPUTER_USE: 'off' })
   assert.deepEqual(disabled, [])
+})
+
+test('configured backend MCP servers are validated and appended', () => {
+  const configured = [{
+    name: 'm1-robot', type: 'stdio', command: process.execPath,
+    args: ['backend-mcp.mjs'], env: [{ name: 'M1_DASHBOARD_URL', value: 'http://127.0.0.1:18080' }],
+  }]
+  const env = {
+    QWEN_AUDIO_AGENT_COMPUTER_USE: 'off',
+    QWEN_AUDIO_BACKEND_MCP_SERVERS: JSON.stringify(configured),
+  }
+  assert.deepEqual(configuredBackendMcpServers(env), configured)
+  assert.deepEqual(builtinMcpServers(env), configured)
+})
+
+test('configured backend MCP rejects invalid descriptors and duplicate names', () => {
+  assert.throws(() => configuredBackendMcpServers({
+    QWEN_AUDIO_BACKEND_MCP_SERVERS: '{',
+  }), /invalid JSON/)
+  assert.throws(() => configuredBackendMcpServers({
+    QWEN_AUDIO_BACKEND_MCP_SERVERS: JSON.stringify([
+      { name: 'same', command: 'one' },
+      { name: 'same', command: 'two' },
+    ]),
+  }), /Duplicate backend MCP server name/)
 })
 
 test('cleans only app-agents created after the builtin MCP lifecycle starts', async () => {

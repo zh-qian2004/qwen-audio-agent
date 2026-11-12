@@ -25,6 +25,56 @@ function settingEnabled(value, fallback = true) {
   return !['false', 'off', '0', 'no', 'disabled'].includes(normalized)
 }
 
+function nonEmptyString(value, field) {
+  const result = String(value ?? '').trim()
+  if (!result) throw new Error(`${field} must not be empty`)
+  return result
+}
+
+export function configuredBackendMcpServers(env = process.env) {
+  const raw = String(env.QWEN_AUDIO_BACKEND_MCP_SERVERS || '').trim()
+  if (!raw) return []
+  let value
+  try { value = JSON.parse(raw) } catch (error) {
+    throw new Error(`QWEN_AUDIO_BACKEND_MCP_SERVERS is invalid JSON: ${error.message}`)
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('QWEN_AUDIO_BACKEND_MCP_SERVERS must be a JSON array')
+  }
+  if (value.length > 16) throw new Error('QWEN_AUDIO_BACKEND_MCP_SERVERS supports at most 16 servers')
+  const names = new Set()
+  return value.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`QWEN_AUDIO_BACKEND_MCP_SERVERS[${index}] must be an object`)
+    }
+    const name = nonEmptyString(item.name, `QWEN_AUDIO_BACKEND_MCP_SERVERS[${index}].name`)
+    if (names.has(name)) throw new Error(`Duplicate backend MCP server name: ${name}`)
+    names.add(name)
+    if (item.type !== undefined && item.type !== 'stdio') {
+      throw new Error(`Backend MCP server ${name} must use stdio transport`)
+    }
+    const args = item.args === undefined ? [] : item.args
+    if (!Array.isArray(args) || args.some(arg => typeof arg !== 'string')) {
+      throw new Error(`Backend MCP server ${name} args must be an array of strings`)
+    }
+    const configuredEnv = item.env === undefined ? [] : item.env
+    if (!Array.isArray(configuredEnv) || configuredEnv.some(entry => (
+      !entry || typeof entry !== 'object' || Array.isArray(entry)
+      || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(entry.name || ''))
+      || typeof entry.value !== 'string'
+    ))) {
+      throw new Error(`Backend MCP server ${name} env must contain string name/value entries`)
+    }
+    return {
+      name,
+      type: 'stdio',
+      command: nonEmptyString(item.command, `Backend MCP server ${name} command`),
+      args: [...args],
+      env: configuredEnv.map(entry => ({ name: entry.name, value: entry.value })),
+    }
+  })
+}
+
 // Inside Electron, require.resolve returns paths within the asar archive.
 // Backend Agents are external processes that cannot read archived files, so
 // point them at the asarUnpack mirror instead.
@@ -73,7 +123,13 @@ export function computerUseMcpServer(env = process.env) {
 }
 
 export function builtinMcpServers(env = process.env) {
-  return [computerUseMcpServer(env)].filter(Boolean)
+  const servers = [computerUseMcpServer(env), ...configuredBackendMcpServers(env)].filter(Boolean)
+  const names = new Set()
+  for (const server of servers) {
+    if (names.has(server.name)) throw new Error(`Duplicate built-in MCP server name: ${server.name}`)
+    names.add(server.name)
+  }
+  return servers
 }
 
 function runningProcesses() {

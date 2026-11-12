@@ -32,5 +32,13 @@ Components:
 - [`deploy/`](deploy/): robot startup assets and vendor patches.
 - [`docs/`](docs/): control-interface and hardware-validation notes.
 
+The one-command launcher also injects `backend-mcp.mjs` into backend Agent
+Sessions. Open-ended goals such as “find a person” are delegated with the
+existing `spawn_thinking` task mechanism; the backend then performs a generic
+observe-act-wait-observe loop using the same Dashboard safety boundary as the
+realtime connector. `m1_wait_for_motion` correlates each physical action by
+`operation_id` before the backend replans. Restart an already-running Gateway
+after enabling this integration so new backend Sessions receive the MCP tools.
+
 For architecture, deployment paths, tool semantics, audio behavior, and test
 commands, see the [Chinese guide](README_ZH.md).

@@ -7,6 +7,7 @@ import { parseEnv } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { userConfigDirectory } from '../../shared/runtime-paths.mjs'
 import {
+  addBackendMcpServer,
   buildConnectorEnv,
   buildGatewayEnv,
   buildSshArgs,
@@ -211,7 +212,19 @@ async function main() {
       }
       console.log('[m1-start] reusing existing Gateway')
     } else if (config.gateway.startLocal) {
-      const gatewayEnv = buildGatewayEnv(config.gateway)
+      let gatewayEnv = buildGatewayEnv(config.gateway)
+      gatewayEnv = addBackendMcpServer(gatewayEnv, {
+        name: 'm1-robot',
+        type: 'stdio',
+        command: process.execPath,
+        args: [join(scriptDir, 'backend-mcp.mjs')],
+        env: [
+          { name: 'M1_DASHBOARD_URL', value: config.connector.dashboardUrl },
+          ...Object.entries(config.connector.environment)
+            .filter(([name]) => name.startsWith('M1_') && name !== 'M1_DASHBOARD_URL')
+            .map(([name, value]) => ({ name, value })),
+        ],
+      })
       const realtimeCredential = canonicalRealtimeCredential(gatewayEnv)
       if (realtimeCredential) gatewayEnv.QWEN_AUDIO_REALTIME_API_KEY = realtimeCredential
       if (config.gateway.buildBeforeStart) await runBuild(gatewayEnv)

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import {
+  addBackendMcpServer,
   buildConnectorEnv,
   buildGatewayEnv,
   buildSshArgs,
@@ -50,6 +51,17 @@ test('launcher config resolves paths and builds process environments', () => {
   assert.equal(connectorEnv.M1_GATEWAY_URL, 'ws://127.0.0.1:18888/api/realtime')
   assert.equal(connectorEnv.M1_AUDIO_SERVICE_ORIGIN, 'http://127.0.0.1:18091')
   assert.equal(connectorEnv.M1_HALF_DUPLEX, '1')
+})
+
+test('launcher appends the M1 backend MCP without discarding configured servers', () => {
+  const existing = JSON.stringify([{
+    name: 'existing', type: 'stdio', command: 'existing-mcp', args: [], env: [],
+  }])
+  const env = addBackendMcpServer({ QWEN_AUDIO_BACKEND_MCP_SERVERS: existing }, {
+    name: 'm1-robot', type: 'stdio', command: 'node', args: ['backend-mcp.mjs'], env: [],
+  })
+  const servers = JSON.parse(env.QWEN_AUDIO_BACKEND_MCP_SERVERS)
+  assert.deepEqual(servers.map(item => item.name), ['existing', 'm1-robot'])
 })
 
 test('launcher config rejects duplicate local SSH ports', () => {

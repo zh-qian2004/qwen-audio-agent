@@ -159,6 +159,22 @@ export function buildGatewayEnv(config, base = process.env) {
   }
 }
 
+export function addBackendMcpServer(env, descriptor) {
+  const key = 'QWEN_AUDIO_BACKEND_MCP_SERVERS'
+  let current = []
+  const raw = String(env[key] || '').trim()
+  if (raw) {
+    try { current = JSON.parse(raw) } catch (error) {
+      throw new Error(`${key} is invalid JSON: ${error.message}`)
+    }
+    if (!Array.isArray(current)) throw new Error(`${key} must be a JSON array`)
+  }
+  const name = text(descriptor?.name, 'backend MCP server name')
+  const servers = current.filter(item => item?.name !== name)
+  servers.push(descriptor)
+  return { ...env, [key]: JSON.stringify(servers) }
+}
+
 export function buildConnectorEnv(config, base = process.env) {
   return {
     ...base,

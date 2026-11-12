@@ -193,6 +193,86 @@ function createQwenFrontend(options = {}) {
   })
 }
 
+test('deletes an interrupted DashScope assistant item from provider conversation', () => {
+  const diagnostics = []
+  const frontend = createQwenFrontend({
+    onDiagnostic: event => diagnostics.push(event),
+  })
+  frontend.ready = true
+  const sent = []
+  frontend.send = event => {
+    sent.push(event)
+    return event
+  }
+
+  frontend.handleLifecycle({
+    type: 'response.output_item.added',
+    response_id: 'response-interrupted',
+    item: { id: 'item-assistant', type: 'message', role: 'assistant' },
+  })
+  frontend.handleLifecycle({
+    type: 'response.done',
+    response: {
+      id: 'response-interrupted',
+      status: 'completed',
+      output: [{ id: 'item-assistant', type: 'message', role: 'assistant' }],
+    },
+  })
+
+  assert.equal(frontend.discardResponseConversation('response-interrupted'), true)
+  assert.deepEqual(sent.at(-1), {
+    type: 'conversation.item.delete',
+    item_id: 'item-assistant',
+  })
+  assert.equal(
+    diagnostics.find(event => event.event === 'realtime.interrupted_context_discarded')?.accepted,
+    true,
+  )
+})
+
+test('closes an interrupted DashScope turn without requesting another response', async () => {
+  const diagnostics = []
+  const frontend = createQwenFrontend({
+    onDiagnostic: event => diagnostics.push(event),
+  })
+  frontend.ready = true
+  const sent = []
+  frontend.send = event => {
+    sent.push(event)
+    return event
+  }
+  frontend.handleLifecycle({
+    type: 'response.output_item.added',
+    response_id: 'response-interrupted',
+    item: { id: 'item-assistant', type: 'message', role: 'assistant' },
+  })
+
+  const closing = frontend.closeInterruptedResponse('response-interrupted')
+  const marker = sent.find(event => event.type === 'conversation.item.create')
+  assert.deepEqual(sent.map(event => event.type), [
+    'conversation.item.delete',
+    'conversation.item.create',
+  ])
+  assert.equal(marker.item.role, 'assistant')
+  assert.equal(marker.item.content[0].type, 'output_text')
+  assert.match(marker.item.content[0].text, /已被用户打断/)
+  assert.equal(sent.some(event => event.type === 'response.create'), false)
+  frontend.handleLifecycle({
+    type: 'conversation.item.created',
+    item: { ...marker.item, status: 'completed' },
+  })
+
+  assert.deepEqual(await closing, {
+    discarded: true,
+    closed: true,
+    itemId: marker.item.id,
+  })
+  assert.equal(
+    diagnostics.find(event => event.event === 'realtime.interrupted_context_closed')?.accepted,
+    true,
+  )
+})
+
 test('projects input parts through the realtime provider boundary', () => {
   const frontend = createQwenFrontend()
   const projection = frontend.projectUserInput([
@@ -2423,6 +2503,7 @@ test('the Qwen provider exposes its supported realtime capabilities', () => {
     acknowledgesConversationItems: true,
     restoreConversationContext: true,
     conversationItems: true,
+    deleteConversationItems: true,
     automaticToolResponses: false,
     clientResponses: true,
     mutableSession: true,

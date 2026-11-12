@@ -83,11 +83,27 @@ export class RealtimeTurnState {
   }
 
   resolveInput(itemId) {
-    return this.correlation.resolve(itemId, this.current())
+    const known = this.correlation.resolve(itemId, null)
+    if (known) return known
+    // Providers may use one id for speech_started and a different id for the
+    // resulting conversation item. Associate that mismatch only while the
+    // current voice input is still open. Once a turn has been committed, an
+    // unknown item is a late/new transcript and must not fall back into it.
+    const inputOpen = Boolean(
+      this.userSpeaking
+      || this.voiceStartItemId
+      || this.turnGeneration > this.committedTurnGeneration
+    )
+    if (!inputOpen) return null
+    return this.correlation.remember(itemId, this.current())
   }
 
   completeInput(itemId) {
-    const completed = this.correlation.complete(itemId, this.current())
+    const context = this.resolveInput(itemId)
+    if (!context) {
+      return { context: null, invalid: true, unmatched: true }
+    }
+    const completed = this.correlation.complete(itemId, context)
     if (
       this.voiceStartItemId
       && this.voiceStartItemId !== itemId

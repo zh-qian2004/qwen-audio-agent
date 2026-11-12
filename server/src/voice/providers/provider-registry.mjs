@@ -37,6 +37,7 @@ const CAPABILITY_FLAGS = [
   'sessionOutputVoice',
   'restoreConversationContext',
   'conversationItems',
+  'deleteConversationItems',
   'automaticToolResponses',
   'clientResponses',
   'mutableSession',

@@ -52,6 +52,7 @@ function harness({ responseOutcome } = {}) {
     reportFrontendError: error => calls.push(['reportFrontendError', error]),
     onSpeechStarted: fields => speechStarts.push(fields),
     onSpeechStopped: fields => speechStops.push(fields),
+    interruptPlaybackContext: () => calls.push(['interruptPlaybackContext']),
     createInputTurnId: () => 'text-1',
   })
   return { runtime, turns, events, records, calls, speechStarts, speechStops }
@@ -155,6 +156,35 @@ test('keeps consecutive utterances separate when the provider reuses an item id'
     ['voice-2', utterances[1]],
   ])
   assert.deepEqual(records.map(record => record.turnId), ['voice-1', 'voice-2'])
+})
+
+test('drops a late unmatched final instead of rewriting the committed voice turn', () => {
+  const { runtime, records, events } = harness()
+
+  runtime.handleProviderEvent({
+    type: 'input_audio_buffer.speech_started',
+    item_id: 'speech-1',
+  })
+  runtime.handleProviderEvent({
+    type: 'input_audio_buffer.speech_stopped',
+    item_id: 'speech-1',
+  })
+  runtime.handleProviderEvent({
+    type: 'conversation.item.input_audio_transcription.completed',
+    item_id: 'transcript-1',
+    transcript: '同意授权',
+  })
+  runtime.handleProviderEvent({
+    type: 'conversation.item.input_audio_transcription.completed',
+    item_id: 'late-transcript-2',
+    transcript: '你现在可以看到我吗',
+  })
+
+  assert.deepEqual(records.map(record => record.content), ['同意授权'])
+  assert.deepEqual(
+    events.filter(event => event.type === 'transcript.final').map(event => event.content),
+    ['同意授权'],
+  )
 })
 
 test('manual text input supersedes speech and reaches the frontend once', async () => {

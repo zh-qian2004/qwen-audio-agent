@@ -47,6 +47,7 @@ export class RealtimeInputRuntime {
     reportFrontendError,
     onSpeechStarted = () => {},
     onSpeechStopped = () => {},
+    interruptPlaybackContext = () => {},
     createInputTurnId = () => `text_${randomUUID().replaceAll('-', '')}`,
   }) {
     this.ownerId = ownerId
@@ -67,6 +68,7 @@ export class RealtimeInputRuntime {
     this.reportFrontendError = reportFrontendError
     this.onSpeechStarted = onSpeechStarted
     this.onSpeechStopped = onSpeechStopped
+    this.interruptPlaybackContext = interruptPlaybackContext
     this.createInputTurnId = createInputTurnId
   }
 
@@ -114,6 +116,7 @@ export class RealtimeInputRuntime {
     })
     this.announcementWindow.beginTurn(started.context.turnId)
     this.announcements.dismissActive()
+    this.interruptPlaybackContext()
     this.send({
       type: GatewayServerEvent.PLAYBACK_CLEAR,
       reason: 'user_interruption',
@@ -133,6 +136,8 @@ export class RealtimeInputRuntime {
   #stopSpeech(event) {
     const stoppedTurn = this.turns.resolveInput(event.item_id)
     if (
+      !stoppedTurn
+      ||
       this.turns.isInputInvalid(event.item_id)
       || this.turns.isStale(stoppedTurn)
     ) {
@@ -176,6 +181,8 @@ export class RealtimeInputRuntime {
   #commitAudio(event) {
     const committedInputTurn = this.turns.resolveInput(event.item_id)
     if (
+      !committedInputTurn
+      ||
       this.turns.isInputInvalid(event.item_id)
       || this.turns.isStale(committedInputTurn)
     ) {

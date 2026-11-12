@@ -56,6 +56,22 @@ test('closes the speech-start correlation when transcription uses another id', (
   })
 })
 
+test('rejects an unknown transcript after the current voice turn is committed', () => {
+  const turns = state()
+
+  turns.beginVoice('provider-speech-id')
+  turns.endSpeech()
+  const completed = turns.completeInput('provider-transcript-id')
+  turns.commit(completed.context)
+
+  assert.deepEqual(turns.completeInput('late-transcript-id'), {
+    context: null,
+    invalid: true,
+    unmatched: true,
+  })
+  assert.equal(turns.resolveInput('late-transcript-id'), null)
+})
+
 test('manual input supersedes voice and rejects late provider speech', () => {
   const turns = state()
   turns.beginVoice('voice-item')

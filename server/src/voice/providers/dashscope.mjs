@@ -102,6 +102,7 @@ export const dashscopeProvider = {
       singleResponseSlot: true,
       sessionOutputVoice: true,
       conversationItemIdEcho: activeModelProfile().family !== 'omni',
+      deleteConversationItems: activeModelProfile().family === 'audio',
       imageRequiresAudioStart: true,
     }
   },

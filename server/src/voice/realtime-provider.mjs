@@ -104,6 +104,9 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   restoreConversationContext: true,
   // Accepts conversation.item.create and acknowledges created items.
   conversationItems: true,
+  // Accepts conversation.item.delete for removing an interrupted assistant
+  // message from provider-side conversation context.
+  deleteConversationItems: false,
   // Tool receipts resume the service's current interaction without an explicit
   // response request. They must be sent even while that interaction is active.
   automaticToolResponses: false,
@@ -115,6 +118,11 @@ const DEFAULT_CAPABILITIES = Object.freeze({
   imageRequiresAudioStart: false,
 })
 const DEFAULT_RESPONSE_CANCEL_GRACE_MS = 1_000
+const INTERRUPTED_RESPONSE_CONTEXT = [
+  '<response_interrupted>',
+  '上一条回复已被用户打断并终止。不要继续、补全或重新执行上一条请求；只处理下一条用户输入。',
+  '</response_interrupted>',
+].join('\n')
 
 export class RealtimeFrontend {
   constructor({
@@ -161,6 +169,7 @@ export class RealtimeFrontend {
     this.pendingResponses = []
     this.retryingResponses = new Set()
     this.responseWaiters = new Map()
+    this.responseConversationItems = new Map()
     this.conversationItemWaiters = new Map()
     this.conversationItemQueue = Promise.resolve()
     this.conversationItemGeneration = 0
@@ -765,6 +774,100 @@ export class RealtimeFrontend {
     recoveryTimer.unref?.()
   }
 
+  trackResponseConversationItems(event) {
+    const responseId = realtimeResponseId(event)
+    if (!responseId) return
+    const candidates = [
+      event.item,
+      ...(Array.isArray(event.response?.output) ? event.response.output : []),
+    ]
+    const ids = candidates
+      .filter(item => item?.type === 'message' && item?.role === 'assistant' && item?.id)
+      .map(item => String(item.id))
+    if (!ids.length) return
+    const known = this.responseConversationItems.get(responseId) || new Set()
+    ids.forEach(id => known.add(id))
+    this.responseConversationItems.set(responseId, known)
+  }
+
+  discardResponseConversation(responseId) {
+    const id = String(responseId || '')
+    const itemIds = [...(this.responseConversationItems.get(id) || [])]
+    this.responseConversationItems.delete(id)
+    if (
+      !id
+      || !itemIds.length
+      || !this.ready
+      || !this.capabilities.deleteConversationItems
+      || typeof this.protocol.conversationItemDelete !== 'function'
+    ) {
+      this.diagnose({
+        event: 'realtime.interrupted_context_discarded',
+        provider: this.provider.key,
+        responseId: id,
+        accepted: false,
+        reason: itemIds.length ? 'unsupported_or_disconnected' : 'item_unknown',
+      })
+      return false
+    }
+    const accepted = itemIds.every(itemId => Boolean(
+      this.send(this.protocol.conversationItemDelete(itemId)),
+    ))
+    this.diagnose({
+      event: 'realtime.interrupted_context_discarded',
+      provider: this.provider.key,
+      responseId: id,
+      itemIds,
+      accepted,
+    })
+    return accepted
+  }
+
+  async closeInterruptedResponse(responseId) {
+    const id = String(responseId || '')
+    const discarded = this.discardResponseConversation(id)
+    if (
+      !id
+      || !this.ready
+      || !this.capabilities.conversationItems
+      || typeof this.protocol.assistantTextItem !== 'function'
+    ) {
+      this.diagnose({
+        event: 'realtime.interrupted_context_closed',
+        provider: this.provider.key,
+        responseId: id,
+        discarded,
+        accepted: false,
+        reason: 'unsupported_or_disconnected',
+      })
+      return { discarded, closed: false }
+    }
+    try {
+      const item = await this.createConversationItem(
+        this.protocol.assistantTextItem(INTERRUPTED_RESPONSE_CONTEXT),
+      )
+      this.diagnose({
+        event: 'realtime.interrupted_context_closed',
+        provider: this.provider.key,
+        responseId: id,
+        itemId: item?.id || '',
+        discarded,
+        accepted: true,
+      })
+      return { discarded, closed: true, itemId: item?.id || '' }
+    } catch (error) {
+      this.diagnose({
+        event: 'realtime.interrupted_context_closed',
+        provider: this.provider.key,
+        responseId: id,
+        discarded,
+        accepted: false,
+        reason: String(error?.message || error),
+      })
+      return { discarded, closed: false }
+    }
+  }
+
   cancelResponses(predicate) {
     const matches = pending => {
       try {
@@ -877,6 +980,7 @@ export class RealtimeFrontend {
   }
 
   handleLifecycle(event) {
+    this.trackResponseConversationItems(event)
     if (event.type === 'error'
       && this.provider.classifyError(realtimeEventErrorMessage(event)) === 'no_active_response') {
       // This acknowledges cancellation; it must not reject an unrelated item.
@@ -1212,6 +1316,7 @@ export class RealtimeFrontend {
     this.responseWaiters.forEach(item => this.settlePending(item, { cancelled: true }))
     this.pendingResponses = []
     this.responseWaiters.clear()
+    this.responseConversationItems.clear()
     this.resolveIdle()
   }
 

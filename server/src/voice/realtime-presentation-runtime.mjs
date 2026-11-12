@@ -121,6 +121,18 @@ export class RealtimePresentationRuntime {
     return this.contexts.entries()
   }
 
+  activePlaybackResponseIds() {
+    return this.activePlaybackContexts().map(({ responseId }) => responseId)
+  }
+
+  activePlaybackContexts() {
+    return [...this.playbackTurns.keys()].flatMap(responseId => {
+      const context = this.contexts.get(responseId)
+      if (!context?.playbackStarted || context.playbackEnded || context.suppressed) return []
+      return [{ responseId, ...this.publicContext(context) }]
+    })
+  }
+
   markFunctionCall(id) {
     const context = this.contexts.get(id)
     if (context) {
@@ -510,7 +522,7 @@ export class RealtimePresentationRuntime {
       && containsReservedProtocolEnvelope(content),
     )
     if (final && !invalidModelProtocol) {
-      this.conversationSync.record({
+      const record = {
         ownerId: this.ownerId,
         sessionId: this.sessionId,
         id: `voice:assistant:${id}`,
@@ -521,7 +533,16 @@ export class RealtimePresentationRuntime {
           : 'agent-presentation',
         ...(citations.length ? { citations } : {}),
         ...context,
-      })
+      }
+      // Do not make audio the user has not heard durable conversation
+      // context. A playback-aware client commits it only after playback ends;
+      // interruption discards the pending record together with the provider
+      // conversation item.
+      if (this.getPlaybackReceipts() && context.hasAudio && !context.playbackEnded) {
+        context.pendingConversationRecord = record
+      } else {
+        this.conversationSync.record(record)
+      }
     }
     this.send({
       type: final
@@ -565,6 +586,7 @@ export class RealtimePresentationRuntime {
       // Provider metadata merges replace the object; the response's turn is
       // stable even if its final transcript arrives after response.done.
       if (!current || current.turnId !== context.turnId || current.turnGeneration !== context.turnGeneration) return
+      this.#commitPendingConversationRecord(current)
       this.contexts.delete(id)
       this.playbackTurns.delete(id)
       this.announcementWindow.finishPlayback(id, {
@@ -572,6 +594,14 @@ export class RealtimePresentationRuntime {
       })
     }, this.responseContextCleanupMs)
     timer.unref?.()
+  }
+
+  #commitPendingConversationRecord(context) {
+    const record = context?.pendingConversationRecord
+    if (!record || context.suppressed) return false
+    context.pendingConversationRecord = null
+    this.conversationSync.record(record)
+    return true
   }
 
   #flushAnnouncementsSoon() {
@@ -616,6 +646,7 @@ export class RealtimePresentationRuntime {
     this.playbackTurns.delete(id)
     if (context) {
       context.playbackEnded = true
+      this.#commitPendingConversationRecord(context)
       this.#finishContextIfComplete(id, context)
       if (this.contexts.get(id) === context) {
         this.#scheduleContextCleanup(id, context)
@@ -692,6 +723,7 @@ export class RealtimePresentationRuntime {
       context.suppressed = true
       context.playbackEnded = true
       context.pendingTranscripts = []
+      context.pendingConversationRecord = null
       this.#scheduleContextCleanup(id, context)
     }
     this.send({

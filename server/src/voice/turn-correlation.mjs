@@ -28,6 +28,10 @@ export class TurnCorrelation {
     return this.turns.get(itemId) || fallback
   }
 
+  has(itemId) {
+    return Boolean(itemId) && this.turns.has(itemId)
+  }
+
   invalidate(itemId) {
     if (itemId) this.invalidItems.add(itemId)
   }

@@ -44,6 +44,11 @@ export const openAiCompatibleProtocol = Object.freeze({
     item,
   }),
 
+  conversationItemDelete: itemId => ({
+    type: 'conversation.item.delete',
+    item_id: itemId,
+  }),
+
   responseCreate: response => ({
     type: 'response.create',
     ...(response ? { response } : {}),
@@ -63,6 +68,12 @@ export const openAiCompatibleProtocol = Object.freeze({
     type: 'message',
     role: 'user',
     content: [{ type: 'input_text', text }],
+  }),
+
+  assistantTextItem: text => ({
+    type: 'message',
+    role: 'assistant',
+    content: [{ type: 'output_text', text }],
   }),
 
   functionOutputItem: (callId, output) => ({

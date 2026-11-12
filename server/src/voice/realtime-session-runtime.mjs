@@ -62,6 +62,28 @@ export function permissionResponseGate({ isCandidate, hasPendingPermission, clai
   }
 }
 
+export function markInterruptedVoiceTurn({
+  conversationSync,
+  ownerId,
+  sessionId,
+  turnId,
+}) {
+  if (!turnId || !conversationSync?.list || !conversationSync?.record) return false
+  const message = conversationSync.list({ ownerId, sessionId }).findLast(item => (
+    item.turnId === turnId
+    && item.role === 'user'
+    && ['voice-user', 'text-user'].includes(item.source)
+  ))
+  if (!message) return false
+  conversationSync.record({
+    ...message,
+    ownerId,
+    sessionId,
+    source: `${message.source}-interrupted`,
+  })
+  return true
+}
+
 /**
  * One frontend conversation runtime per client connection.
  * Receives decoded semantic input plus trusted identity; emits internal events.
@@ -550,6 +572,22 @@ export function createRealtimeSessionRuntime({
     shouldEnsurePermissionResponse: context => responseTurnCandidate === context,
     ensurePermissionResponseFor,
     reportFrontendError,
+    interruptPlaybackContext: () => {
+      for (const context of presentationRuntime?.activePlaybackContexts?.() || []) {
+        if (!['model', 'agent'].includes(context.origin)) continue
+        markInterruptedVoiceTurn({
+          conversationSync,
+          ownerId,
+          sessionId,
+          turnId: context.turnId,
+        })
+        realtimeSession.frontend?.closeInterruptedResponse?.(context.responseId)
+          ?.catch?.(error => connectionLogger.warn('realtime.interrupted_context_close_failed', {
+            responseId: context.responseId,
+            error: String(error?.message || error),
+          }))
+      }
+    },
     onSpeechStarted: fields => {
       connectionLogger.info('realtime.provider.speech_started', fields)
       observeSessionAudio({ type: 'speech_started', ...fields })

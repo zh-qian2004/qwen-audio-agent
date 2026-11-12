@@ -297,7 +297,7 @@ test('correlates an implicit provider response with the pending voice turn', () 
   )
 })
 
-test('holds audio transcripts until playback starts and records them once', () => {
+test('holds audio transcripts until playback starts and records them after playback ends', () => {
   const { runtime, events, records, calls } = harness()
   const context = {
     turnId: 'turn-1',
@@ -336,6 +336,8 @@ test('holds audio transcripts until playback starts and records them once', () =
       { type: 'transcript.final', content: '后台任务完成了' },
     ],
   )
+  assert.equal(records.length, 0)
+  runtime.finishPlayback('response-1')
   assert.equal(records.length, 1)
   assert.equal(records[0].source, 'realtime-direct')
   assert.equal(
@@ -523,6 +525,31 @@ test('user interruption confirms an announcement and suppresses late output', ()
     3,
   )
   assert.equal(calls.some(([name]) => name === 'retryMany'), false)
+})
+
+test('commits assistant speech only after playback ends and drops interrupted speech', () => {
+  const completed = harness()
+  deliver(completed.runtime, {
+    type: 'response.audio.delta', response_id: 'completed', delta: 'audio',
+  })
+  deliver(completed.runtime, {
+    type: 'response.audio_transcript.done', response_id: 'completed', transcript: '完整回复',
+  })
+  completed.runtime.startPlayback('completed')
+  assert.equal(completed.records.length, 0)
+  completed.runtime.finishPlayback('completed')
+  assert.deepEqual(completed.records.map(record => record.content), ['完整回复'])
+
+  const interrupted = harness()
+  deliver(interrupted.runtime, {
+    type: 'response.audio.delta', response_id: 'interrupted', delta: 'audio',
+  })
+  deliver(interrupted.runtime, {
+    type: 'response.audio_transcript.done', response_id: 'interrupted', transcript: '不应进入历史',
+  })
+  interrupted.runtime.startPlayback('interrupted')
+  interrupted.runtime.cancelPlayback('interrupted', { reason: 'user_interruption' })
+  assert.deepEqual(interrupted.records, [])
 })
 
 test('a due reminder is confirmed once it plays, or completes for a non-voice client', () => {

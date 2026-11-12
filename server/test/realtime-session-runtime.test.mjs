@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createRealtimeSessionRuntime, permissionResponseGate } from '../src/voice/realtime-session-runtime.mjs'
+import {
+  createRealtimeSessionRuntime,
+  markInterruptedVoiceTurn,
+  permissionResponseGate,
+} from '../src/voice/realtime-session-runtime.mjs'
 import { RealtimeFrontend, REALTIME_PROVIDERS } from '../src/voice/realtime-provider.mjs'
 import { SessionObservers } from '../src/voice/session-observers.mjs'
 import { InputAssetRegistry } from '../src/voice/input-asset-registry.mjs'
@@ -75,7 +79,8 @@ function harness(t, {
     taskAnnouncementFactory: createTaskAnnouncementRuntime,
     realtimeFrontendFactory: options => {
       const f = {
-        provider, ready: false, inputs: [], audio: [], images: [], outputs: [], deliveries: [], updates: [], cancels: 0,
+        provider, ready: false, inputs: [], audio: [], images: [], outputs: [], deliveries: [], updates: [],
+        interruptedResponses: [], cancels: 0,
         initialContext: options.agentContext, sessionOptions: options.sessionOptions,
         async connect() { this.ready = true },
         close() { this.ready = false },
@@ -91,6 +96,7 @@ function harness(t, {
           return { completed: true, contextInjected: true }
         },
         async appendUserInputContext() {}, async ensureResponse() {}, async whenIdle() {},
+        async closeInterruptedResponse(responseId) { this.interruptedResponses.push(responseId) },
         emit: options.onEvent,
         diagnose: options.onDiagnostic,
         settle: options.onResponseSettled,
@@ -119,6 +125,28 @@ function harness(t, {
   return { runtime, send, connect, request, manager, operations, events, frontends, runs, tasks, observations,
     done, logs, memoryListeners, provider, conversationSync, ownerId, sessionId }
 }
+
+test('marking an interrupted turn removes it from future model context', () => {
+  const conversationSync = new ConversationSync()
+  const identity = { ownerId: 'owner', sessionId: 'session' }
+  conversationSync.record({
+    ...identity,
+    id: 'voice:user:turn-1',
+    role: 'user',
+    source: 'voice-user',
+    turnId: 'turn-1',
+    content: '从一数到二十',
+  })
+
+  assert.equal(markInterruptedVoiceTurn({
+    conversationSync,
+    ...identity,
+    turnId: 'turn-1',
+  }), true)
+  assert.equal(conversationSync.list(identity)[0].source, 'voice-user-interrupted')
+  assert.deepEqual(conversationSync.frontendContext(identity), [])
+  assert.deepEqual(conversationSync.coordinatorSnapshot(identity).messages, [])
+})
 
 test('negotiated receipt-less audio keeps result notifications pending while tasks and conversation work', async t => {
   const h = harness(t)

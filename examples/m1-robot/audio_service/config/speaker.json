@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "provider": "sherpa_onnx_campplus",
+  "model_path": "/userdata/audio_service/models/speaker/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+  "registry_path": "/userdata/audio_service/data/speakers.json",
+  "sample_rate": 16000,
+  "frame_ms": 20,
+  "num_threads": 2,
+  "energy_threshold_dbfs": -42.0,
+  "start_frames": 3,
+  "end_silence_ms": 500,
+  "pre_roll_ms": 300,
+  "min_audio_ms": 1500,
+  "max_audio_ms": 12000,
+  "threshold": 0.50,
+  "min_margin": 0.04,
+  "history_size": 100,
+  "event_queue_size": 100
+}

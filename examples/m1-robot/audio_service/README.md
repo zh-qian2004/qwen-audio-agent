@@ -100,6 +100,7 @@ Agent 本身不属于本项目。`audio_service` 向 Agent 提供音频流、ASR
 - `GET /api/audio/status`、`GET /api/audio/level`、`WS /ws/audio/input`；
 - 输入电平（RMS/Peak dBFS，约 10 Hz）与健康检查中的输入段落；
 - Processor / Session 稳定接口 + Mock ASR / Mock TSE 测试消费者（不进入生产 API）；
+- 常驻说话人识别 Processor：CAM++ embedding、档案注册与识别事件；模型及数据保存在机器人上；
 - Dashboard 迁移：电平与 PCM WebSocket 全部改为代理 audio_service，不再订阅 ROS 话题；
 - TTS（合成、转换、队列、ROS 播放、Dashboard 代理）。
 
@@ -107,7 +108,7 @@ Agent 本身不属于本项目。`audio_service` 向 Agent 提供音频流、ASR
 
 - VAD 与流式 ASR（接口已就绪，等真实模型接入）；
 - TSE、目标说话人档案和提取管线；
-- 说话人识别与验证；
+- 进一步的说话人验证和跨设备档案同步；
 - 用户说话打断播报（barge-in）；
 - 厂商语音与二次开发语音的完整仲裁。
 
@@ -121,6 +122,8 @@ Agent 本身不属于本项目。`audio_service` 向 Agent 提供音频流、ASR
 /api/tse/*         目标说话人档案、提取任务和状态
 /api/speakers/*    说话人注册、识别与管理
 ```
+
+说话人识别由独立麦克风进程的 `input_main.py` 注册为常驻 Processor，与 Agent 输入流并行消费 Audio Bus。模型依赖见 `config/speaker-requirements.txt`，配置见 `config/speaker.json`；ONNX 模型文件和个人声纹档案不入库。接口包括 `GET /api/speakers/status`、`GET /api/speakers`、`POST /api/speakers/enroll/start|finish|cancel`、`DELETE /api/speakers/{speaker_id}` 和 `WS /ws/speakers/events`。`scripts/benchmark_speaker.py` 可测量模型加载及推理时延。
 
 所有模块共用统一任务 ID、状态阶段、错误结构、幂等语义、密钥管理和健康检查。
 

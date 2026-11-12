@@ -14,11 +14,13 @@ import math
 import os
 import statistics
 import time
-from collections import deque
+from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterable, List, Optional
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional
+
+import numpy as np
 
 from input.audio_frame import AudioFrame
 
@@ -35,6 +37,13 @@ def _normalise(values: Iterable[float]) -> List[float]:
 
 def _cosine(left: Iterable[float], right: Iterable[float]) -> float:
     return sum(a * b for a, b in zip(left, right))
+
+
+def _centroid(embeddings: Iterable[Iterable[float]]) -> List[float]:
+    vectors = [list(vector) for vector in embeddings]
+    if not vectors:
+        raise ValueError("at least one speaker embedding is required")
+    return _normalise(statistics.fmean(values) for values in zip(*vectors))
 
 
 def _percentile(values: List[float], percentile: float) -> Optional[float]:
@@ -87,8 +96,6 @@ class SherpaOnnxSpeakerProvider:
     def embed(self, pcm: bytes, sample_rate: int = 16000) -> List[float]:
         if self.extractor is None:
             raise RuntimeError("speaker model is not loaded")
-        import numpy as np
-
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
         if samples.size < sample_rate:
             raise ValueError("speaker audio must contain at least 1 second")
@@ -108,10 +115,11 @@ class Enrollment:
     started_at: float = field(default_factory=time.time)
     pcm: bytearray = field(default_factory=bytearray)
     voiced_ms: int = 0
+    dropped_playback_ms: int = 0
 
 
 class SpeakerIdentityService:
-    VERSION = "1.0.0"
+    VERSION = "1.2.0"
 
     def __init__(
         self,
@@ -119,6 +127,7 @@ class SpeakerIdentityService:
         *,
         root: Optional[Path] = None,
         provider: Optional[Any] = None,
+        acoustic_state_provider: Optional[Callable[[], Dict[str, Any]]] = None,
     ):
         cfg = dict(config or {})
         self.root = Path(root or Path(__file__).resolve().parent.parent)
@@ -126,6 +135,10 @@ class SpeakerIdentityService:
         self.sample_rate = int(cfg.get("sample_rate", 16000))
         self.frame_ms = int(cfg.get("frame_ms", 20))
         self.energy_threshold_dbfs = float(cfg.get("energy_threshold_dbfs", -42.0))
+        self.adaptive_energy_enabled = bool(cfg.get("adaptive_energy_enabled", True))
+        self.energy_floor_dbfs = float(cfg.get("energy_floor_dbfs", -55.0))
+        self.energy_ceiling_dbfs = float(cfg.get("energy_ceiling_dbfs", -35.0))
+        self.vad_snr_db = max(1.0, float(cfg.get("vad_snr_db", 6.0)))
         self.start_frames = max(1, int(cfg.get("start_frames", 3)))
         self.end_silence_ms = max(self.frame_ms, int(cfg.get("end_silence_ms", 500)))
         self.min_audio_ms = max(1000, int(cfg.get("min_audio_ms", 1500)))
@@ -133,6 +146,21 @@ class SpeakerIdentityService:
         self.pre_roll_ms = max(0, int(cfg.get("pre_roll_ms", 300)))
         self.threshold = float(cfg.get("threshold", 0.50))
         self.min_margin = float(cfg.get("min_margin", 0.04))
+        self.min_snr_db = max(0.0, float(cfg.get("min_snr_db", 8.0)))
+        self.max_clip_ratio = min(1.0, max(0.0, float(cfg.get("max_clip_ratio", 0.01))))
+        self.evidence_target_ms = max(
+            self.min_audio_ms, int(cfg.get("evidence_target_ms", 1800))
+        )
+        self.evidence_max_gap_ms = max(0, int(cfg.get("evidence_max_gap_ms", 5000)))
+        self.enrollment_sample_ms = max(
+            self.min_audio_ms, int(cfg.get("enrollment_sample_ms", 2000))
+        )
+        self.enrollment_min_samples = max(2, int(cfg.get("enrollment_min_samples", 3)))
+        self.enrollment_target_ms = max(
+            self.enrollment_sample_ms * self.enrollment_min_samples,
+            int(cfg.get("enrollment_target_ms", 6000)),
+        )
+        self.auto_finish_enrollment = bool(cfg.get("auto_finish_enrollment", True))
         self.num_threads = max(1, int(cfg.get("num_threads", 2)))
         self.history_size = max(10, int(cfg.get("history_size", 100)))
         self.event_queue_size = max(10, int(cfg.get("event_queue_size", 100)))
@@ -153,6 +181,7 @@ class SpeakerIdentityService:
         self.provider = provider or SherpaOnnxSpeakerProvider(
             str(self.model_path), num_threads=self.num_threads
         )
+        self.acoustic_state_provider = acoustic_state_provider
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="speaker-identity")
         self.ready = False
         self.phase = "disabled" if not self.enabled else "created"
@@ -169,10 +198,19 @@ class SpeakerIdentityService:
         self._speech_streak = 0
         self._silence_ms = 0
         self._active_pcm: Optional[bytearray] = None
+        self._active_voiced_pcm = bytearray()
         self._active_started_at = None
         self._active_start_sequence = None
         self._turn_counter = 0
         self._inference_tasks: set[asyncio.Task] = set()
+        self._enrollment_finish_task: Optional[asyncio.Task] = None
+        self._active_voiced_dbfs: List[float] = []
+        self._active_playback_frames = 0
+        self._active_near_end_frames = 0
+        self._noise_floor_dbfs = min(-55.0, self.energy_threshold_dbfs - 12.0)
+        self._evidence_pcm = bytearray()
+        self._evidence_updated_at = 0.0
+        self._evidence_turns = 0
 
         self._events: Deque[Dict[str, Any]] = deque(maxlen=self.history_size)
         self._subscribers: set = set()
@@ -181,6 +219,7 @@ class SpeakerIdentityService:
         self._identity_ready_ms: Deque[float] = deque(maxlen=200)
         self._ingest_us: Deque[float] = deque(maxlen=1000)
         self._inference_count = 0
+        self._filter_counts: Counter = Counter()
 
     async def start(self) -> bool:
         if not self.enabled:
@@ -210,6 +249,10 @@ class SpeakerIdentityService:
             return False
 
     async def stop(self) -> None:
+        if self._enrollment_finish_task is not None:
+            self._enrollment_finish_task.cancel()
+            await asyncio.gather(self._enrollment_finish_task, return_exceptions=True)
+            self._enrollment_finish_task = None
         tasks = list(self._inference_tasks)
         for task in tasks:
             task.cancel()
@@ -239,6 +282,9 @@ class SpeakerIdentityService:
                 "embedding": _normalise(embedding),
                 "created_at": float(item.get("created_at") or time.time()),
                 "updated_at": float(item.get("updated_at") or time.time()),
+                "sample_count": int(item.get("sample_count") or 1),
+                "voiced_ms": int(item.get("voiced_ms") or 0),
+                "sample_dispersion": item.get("sample_dispersion"),
             }
 
     def _save_profiles(self) -> None:
@@ -278,11 +324,33 @@ class SpeakerIdentityService:
         enrollment = self.enrollment
         if enrollment is None:
             raise RuntimeError("no enrollment is active")
-        if enrollment.voiced_ms < self.min_audio_ms:
+        if enrollment.voiced_ms < self.enrollment_target_ms:
             raise ValueError(
-                f"not enough voiced audio: {enrollment.voiced_ms}ms, need {self.min_audio_ms}ms"
+                f"not enough voiced audio: {enrollment.voiced_ms}ms, "
+                f"need {self.enrollment_target_ms}ms across "
+                f"{self.enrollment_min_samples} samples"
             )
-        embedding, timings = await self._embed(bytes(enrollment.pcm))
+        sample_bytes = self.enrollment_sample_ms * self.sample_rate * 2 // 1000
+        samples = [
+            bytes(enrollment.pcm[offset:offset + sample_bytes])
+            for offset in range(0, len(enrollment.pcm), sample_bytes)
+            if len(enrollment.pcm[offset:offset + sample_bytes]) >= self.min_audio_ms * self.sample_rate * 2 // 1000
+        ][:self.enrollment_min_samples]
+        if len(samples) < self.enrollment_min_samples:
+            raise ValueError(
+                f"not enough enrollment samples: {len(samples)}, "
+                f"need {self.enrollment_min_samples}"
+            )
+        embedded = [await self._embed(sample) for sample in samples]
+        if self.enrollment is not enrollment:
+            raise RuntimeError("speaker enrollment was cancelled during finalization")
+        embeddings = [item[0] for item in embedded]
+        embedding = _centroid(embeddings)
+        similarities = [_cosine(vector, embedding) for vector in embeddings]
+        timings = {
+            "inference_ms": round(sum(item[1]["inference_ms"] for item in embedded), 3),
+            "queue_wait_ms": round(sum(item[1]["queue_wait_ms"] for item in embedded), 3),
+        }
         if self.enrollment is enrollment:
             self.enrollment = None
         now = time.time()
@@ -294,6 +362,9 @@ class SpeakerIdentityService:
             "embedding": embedding,
             "created_at": previous.get("created_at", now) if previous else now,
             "updated_at": now,
+            "sample_count": len(samples),
+            "voiced_ms": enrollment.voiced_ms,
+            "sample_dispersion": round(1.0 - min(similarities), 4),
         }
         self._save_profiles()
         result = {
@@ -301,6 +372,9 @@ class SpeakerIdentityService:
             "display_name": enrollment.display_name,
             "role": enrollment.role,
             "voiced_ms": enrollment.voiced_ms,
+            "sample_count": len(samples),
+            "sample_dispersion": round(1.0 - min(similarities), 4),
+            "auto_completed": enrollment.voiced_ms >= self.enrollment_target_ms,
             **timings,
         }
         await self._publish({"type": "speaker.enrolled", **result})
@@ -309,6 +383,9 @@ class SpeakerIdentityService:
     def cancel_enrollment(self) -> Dict[str, Any]:
         active = self.enrollment
         self.enrollment = None
+        task = self._enrollment_finish_task
+        if task is not None and not task.done():
+            task.cancel()
         return {
             "cancelled": active is not None,
             "speaker_id": active.speaker_id if active else None,
@@ -329,6 +406,15 @@ class SpeakerIdentityService:
             "display_name": self.enrollment.display_name,
             "role": self.enrollment.role,
             "voiced_ms": self.enrollment.voiced_ms,
+            "target_ms": self.enrollment_target_ms,
+            "sample_ms": self.enrollment_sample_ms,
+            "required_samples": self.enrollment_min_samples,
+            "collected_samples": min(
+                self.enrollment_min_samples,
+                self.enrollment.voiced_ms // self.enrollment_sample_ms,
+            ),
+            "dropped_playback_ms": self.enrollment.dropped_playback_ms,
+            "auto_finish_pending": self._enrollment_finish_task is not None,
             "started_at": round(self.enrollment.started_at, 3),
         }
 
@@ -339,16 +425,26 @@ class SpeakerIdentityService:
             self.gap_count += 1
         self.last_sequence = frame.sequence
 
+        acoustic_state = self._acoustic_state()
         rms = audioop.rms(frame.pcm, 2) if frame.pcm else 0
         dbfs = 20.0 * math.log10(rms / 32768.0) if rms else -96.0
-        voiced = dbfs >= self.energy_threshold_dbfs
-        if voiced:
+        voice_threshold_dbfs = self._voice_threshold_dbfs()
+        voiced = dbfs >= voice_threshold_dbfs
+        usable_voice = voiced and acoustic_state != "suppressed"
+        if not voiced and acoustic_state == "idle":
+            self._noise_floor_dbfs = self._noise_floor_dbfs * 0.98 + dbfs * 0.02
+        if usable_voice:
             self.voiced_frames += 1
             self._speech_streak += 1
             self._silence_ms = 0
-            if self.enrollment is not None and self.enrollment.voiced_ms < self.max_audio_ms:
-                self.enrollment.pcm.extend(frame.pcm)
-                self.enrollment.voiced_ms += self.frame_ms
+            if self.enrollment is not None:
+                if acoustic_state == "idle" and self.enrollment.voiced_ms < self.enrollment_target_ms:
+                    self.enrollment.pcm.extend(frame.pcm)
+                    self.enrollment.voiced_ms += self.frame_ms
+                    self._maybe_auto_finish_enrollment(self.enrollment)
+                elif acoustic_state != "idle":
+                    self.enrollment.dropped_playback_ms += self.frame_ms
+                    self._filter_counts["enrollment_playback"] += 1
         else:
             self._speech_streak = 0
             if self._active_pcm is not None:
@@ -362,6 +458,10 @@ class SpeakerIdentityService:
                 self._active_started_at = time.monotonic()
                 self._active_start_sequence = frame.sequence - len(self._pre_roll) + 1
                 self._silence_ms = 0
+                self._active_voiced_pcm = bytearray(frame.pcm if usable_voice else b"")
+                self._active_voiced_dbfs = [dbfs] if usable_voice else []
+                self._active_playback_frames = 0
+                self._active_near_end_frames = 0
                 await self._publish({
                     "type": "speaker.turn.started",
                     "speaker_turn_id": f"speaker-{self._turn_counter}",
@@ -369,35 +469,211 @@ class SpeakerIdentityService:
                 })
         else:
             self._active_pcm.extend(frame.pcm)
+            if usable_voice:
+                self._active_voiced_dbfs.append(dbfs)
+                self._active_voiced_pcm.extend(frame.pcm)
+            if acoustic_state in {"suppressed", "near_end"}:
+                self._active_playback_frames += 1
+            if acoustic_state == "near_end":
+                self._active_near_end_frames += 1
             active_ms = len(self._active_pcm) * 1000 // (self.sample_rate * 2)
             if self._silence_ms >= self.end_silence_ms or active_ms >= self.max_audio_ms:
                 pcm = bytes(self._active_pcm)
+                voiced_pcm = bytes(self._active_voiced_pcm)
                 started_at = self._active_started_at or time.monotonic()
                 start_sequence = self._active_start_sequence
                 turn_id = f"speaker-{self._turn_counter}"
                 self._active_pcm = None
+                self._active_voiced_pcm.clear()
                 self._active_started_at = None
                 self._active_start_sequence = None
                 self._silence_ms = 0
                 self._pre_roll.clear()
-                audio_ms = len(pcm) * 1000 // (self.sample_rate * 2)
-                if audio_ms >= self.min_audio_ms and self.profiles:
-                    self._schedule_identification(
-                        pcm, turn_id, started_at, start_sequence, frame.sequence, audio_ms
-                    )
-                else:
-                    await self._publish({
-                        "type": "speaker.identity",
-                        "speaker_turn_id": turn_id,
-                        "speaker_id": None,
-                        "status": "unknown" if self.profiles else "no_profiles",
-                        "confidence": None,
-                        "audio_ms": audio_ms,
-                        "audio_start_sequence": start_sequence,
-                        "audio_end_sequence": frame.sequence,
-                    })
+                segment_ms = len(pcm) * 1000 // (self.sample_rate * 2)
+                audio_ms = len(voiced_pcm) * 1000 // (self.sample_rate * 2)
+                voiced_dbfs = self._active_voiced_dbfs
+                playback_frames = self._active_playback_frames
+                near_end_frames = self._active_near_end_frames
+                self._active_voiced_dbfs = []
+                self._active_playback_frames = 0
+                self._active_near_end_frames = 0
+                await self._complete_segment(
+                    pcm=voiced_pcm,
+                    turn_id=turn_id,
+                    started_at=started_at,
+                    start_sequence=start_sequence,
+                    end_sequence=frame.sequence,
+                    audio_ms=audio_ms,
+                    voiced_dbfs=voiced_dbfs,
+                    playback_frames=playback_frames,
+                    near_end_frames=near_end_frames,
+                    segment_ms=segment_ms,
+                )
 
         self._ingest_us.append((time.perf_counter() - started) * 1_000_000.0)
+
+    def _acoustic_state(self) -> str:
+        if self.acoustic_state_provider is None:
+            return "idle"
+        try:
+            status = self.acoustic_state_provider() or {}
+            return str((status.get("last") or {}).get("state") or "idle")
+        except Exception:
+            return "idle"
+
+    def _voice_threshold_dbfs(self) -> float:
+        if not self.adaptive_energy_enabled:
+            return self.energy_threshold_dbfs
+        lower = min(self.energy_floor_dbfs, self.energy_ceiling_dbfs)
+        upper = max(self.energy_floor_dbfs, self.energy_ceiling_dbfs)
+        return min(upper, max(lower, self._noise_floor_dbfs + self.vad_snr_db))
+
+    def _maybe_auto_finish_enrollment(self, enrollment: Enrollment) -> None:
+        if not self.auto_finish_enrollment:
+            return
+        if enrollment.voiced_ms < self.enrollment_target_ms:
+            return
+        if self._enrollment_finish_task is not None:
+            return
+
+        async def finish() -> None:
+            try:
+                if self.enrollment is enrollment:
+                    await self.finish_enrollment()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                LOG.exception("自动完成说话人注册失败 speaker=%s", enrollment.speaker_id)
+                await self._publish({
+                    "type": "speaker.enrollment.failed",
+                    "speaker_id": enrollment.speaker_id,
+                    "error": self.last_error,
+                })
+            finally:
+                self._enrollment_finish_task = None
+
+        self._enrollment_finish_task = asyncio.create_task(
+            finish(), name=f"speaker-enroll-{enrollment.speaker_id}"
+        )
+
+    async def _complete_segment(
+        self,
+        *,
+        pcm: bytes,
+        turn_id: str,
+        started_at: float,
+        start_sequence: Optional[int],
+        end_sequence: int,
+        audio_ms: int,
+        voiced_dbfs: List[float],
+        playback_frames: int,
+        near_end_frames: int,
+        segment_ms: int,
+    ) -> None:
+        common = {
+            "speaker_turn_id": turn_id,
+            "speaker_id": None,
+            "confidence": None,
+            "audio_ms": audio_ms,
+            "audio_start_sequence": start_sequence,
+            "audio_end_sequence": end_sequence,
+        }
+        if not self.profiles:
+            self._clear_evidence()
+            self._filter_counts["no_profiles"] += 1
+            await self._publish({"type": "speaker.identity", "status": "no_profiles", **common})
+            return
+
+        reason, quality = self._segment_quality(
+            pcm, voiced_dbfs, playback_frames, near_end_frames
+        )
+        if reason is not None:
+            self._clear_evidence()
+            self._filter_counts[reason] += 1
+            await self._publish({
+                "type": "speaker.identity",
+                "status": "unknown",
+                "reason": reason,
+                "quality": quality,
+                "segment_ms": segment_ms,
+                **common,
+            })
+            return
+
+        now = time.monotonic()
+        evidence_pcm = bytes(pcm)
+        evidence_turns = 1
+        if (
+            self._evidence_pcm
+            and (now - self._evidence_updated_at) * 1000.0 <= self.evidence_max_gap_ms
+            and audio_ms < self.evidence_target_ms
+        ):
+            evidence_pcm = bytes(self._evidence_pcm) + evidence_pcm
+            evidence_turns += self._evidence_turns
+
+        evidence_ms = len(evidence_pcm) * 1000 // (self.sample_rate * 2)
+        if evidence_ms < self.min_audio_ms:
+            self._evidence_pcm = bytearray(evidence_pcm)
+            self._evidence_updated_at = now
+            self._evidence_turns = evidence_turns
+            self._filter_counts["too_short"] += 1
+            await self._publish({
+                "type": "speaker.identity",
+                "status": "insufficient_audio",
+                "reason": "too_short",
+                "evidence_audio_ms": evidence_ms,
+                "evidence_turns": evidence_turns,
+                "quality": quality,
+                "segment_ms": segment_ms,
+                **common,
+            })
+            return
+
+        self._evidence_pcm.clear()
+        self._evidence_updated_at = 0.0
+        self._evidence_turns = 0
+        self._schedule_identification(
+            evidence_pcm,
+            turn_id,
+            started_at,
+            start_sequence,
+            end_sequence,
+            audio_ms,
+            evidence_audio_ms=evidence_ms,
+            evidence_turns=evidence_turns,
+            quality=quality,
+        )
+
+    def _clear_evidence(self) -> None:
+        self._evidence_pcm.clear()
+        self._evidence_updated_at = 0.0
+        self._evidence_turns = 0
+
+    def _segment_quality(
+        self,
+        pcm: bytes,
+        voiced_dbfs: List[float],
+        playback_frames: int,
+        near_end_frames: int,
+    ) -> tuple[Optional[str], Dict[str, Any]]:
+        samples = np.frombuffer(pcm, dtype="<i2") if pcm else np.array([], dtype=np.int16)
+        clip_ratio = float(np.mean(np.abs(samples.astype(np.int32)) >= 32700)) if samples.size else 0.0
+        speech_dbfs = statistics.median(voiced_dbfs) if voiced_dbfs else -96.0
+        snr_db = speech_dbfs - self._noise_floor_dbfs
+        quality = {
+            "snr_db": round(snr_db, 2),
+            "clip_ratio": round(clip_ratio, 5),
+            "playback_frames": playback_frames,
+            "near_end_frames": near_end_frames,
+        }
+        if playback_frames and near_end_frames == 0:
+            return "playback_active", quality
+        if clip_ratio > self.max_clip_ratio:
+            return "clipped", quality
+        if snr_db < self.min_snr_db:
+            return "low_snr", quality
+        return None, quality
 
     def _schedule_identification(
         self,
@@ -407,6 +683,10 @@ class SpeakerIdentityService:
         start_sequence: Optional[int],
         end_sequence: int,
         audio_ms: int,
+        *,
+        evidence_audio_ms: Optional[int] = None,
+        evidence_turns: int = 1,
+        quality: Optional[Dict[str, Any]] = None,
     ) -> None:
         queued_at = time.monotonic()
 
@@ -424,7 +704,14 @@ class SpeakerIdentityService:
                 best_score, best = ranked[0]
                 second_score = ranked[1][0] if len(ranked) > 1 else -1.0
                 margin = best_score - second_score
-                verified = best_score >= self.threshold and margin >= self.min_margin
+                profile_threshold = float(best.get("threshold", self.threshold))
+                verified = best_score >= profile_threshold and margin >= self.min_margin
+                decision_reason = None
+                if best_score < profile_threshold:
+                    decision_reason = "low_score"
+                elif margin < self.min_margin:
+                    decision_reason = "low_margin"
+                self._filter_counts["verified" if verified else decision_reason] += 1
                 identity_ready_ms = (time.monotonic() - started_at) * 1000.0
                 self._identity_ready_ms.append(identity_ready_ms)
                 payload = {
@@ -434,9 +721,14 @@ class SpeakerIdentityService:
                     "display_name": best["display_name"] if verified else None,
                     "role": best["role"] if verified else None,
                     "status": "verified" if verified else "unknown",
+                    "reason": decision_reason,
                     "confidence": round(best_score, 4),
                     "margin": round(margin, 4),
+                    "threshold": round(profile_threshold, 4),
                     "audio_ms": audio_ms,
+                    "evidence_audio_ms": evidence_audio_ms or audio_ms,
+                    "evidence_turns": evidence_turns,
+                    "quality": quality or {},
                     "audio_start_sequence": start_sequence,
                     "audio_end_sequence": end_sequence,
                     "identity_ready_ms": round(identity_ready_ms, 3),
@@ -553,11 +845,29 @@ class SpeakerIdentityService:
                 "identity_ready_ms_p95": _percentile(identity_ready, 0.95),
                 "ingest_us_p95": _percentile(ingest, 0.95),
             },
+            "decisions": dict(self._filter_counts),
+            "evidence": {
+                "buffered_audio_ms": len(self._evidence_pcm) * 1000 // (self.sample_rate * 2),
+                "buffered_turns": self._evidence_turns,
+                "target_ms": self.evidence_target_ms,
+                "max_gap_ms": self.evidence_max_gap_ms,
+            },
             "thresholds": {
                 "energy_dbfs": self.energy_threshold_dbfs,
+                "adaptive_energy_enabled": self.adaptive_energy_enabled,
+                "current_energy_dbfs": round(self._voice_threshold_dbfs(), 2),
+                "energy_floor_dbfs": self.energy_floor_dbfs,
+                "energy_ceiling_dbfs": self.energy_ceiling_dbfs,
+                "vad_snr_db": self.vad_snr_db,
                 "speaker": self.threshold,
                 "min_margin": self.min_margin,
                 "min_audio_ms": self.min_audio_ms,
+                "min_snr_db": self.min_snr_db,
+                "max_clip_ratio": self.max_clip_ratio,
+                "noise_floor_dbfs": round(self._noise_floor_dbfs, 2),
+                "enrollment_target_ms": self.enrollment_target_ms,
+                "enrollment_min_samples": self.enrollment_min_samples,
+                "auto_finish_enrollment": self.auto_finish_enrollment,
             },
             "last_error": self.last_error,
             "recent_events": list(self._events)[-10:],

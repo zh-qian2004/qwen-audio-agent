@@ -54,7 +54,11 @@ runtime_config["executor_threads"] = 1
 RUNTIME = RosRuntime(runtime_config, node_name="audio_service_input")
 ECHO_SUPPRESSOR = EchoSuppressor(CONFIG.get("echo_suppression", {}))
 GATEWAY = AudioGateway(CONFIG, runtime=RUNTIME, echo_suppressor=ECHO_SUPPRESSOR)
-SPEAKERS = SpeakerIdentityService(SPEAKER_CONFIG, root=ROOT)
+SPEAKERS = SpeakerIdentityService(
+    SPEAKER_CONFIG,
+    root=ROOT,
+    acoustic_state_provider=ECHO_SUPPRESSOR.status,
+)
 GATEWAY.sessions.register(
     "speaker_identity", lambda: SpeakerIdentityProcessor(SPEAKERS)
 )

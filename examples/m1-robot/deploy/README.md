@@ -12,7 +12,7 @@
 | Dashboard | `/userdata/developer/dashboard` |
 | 视觉服务 | `/userdata/developer/vision_service` |
 
-发布版本在 `/userdata/developer/audio-agent/releases/`，`run/active-release` 指向当前版本。每个版本的 `release-manifest.json` 记录 Git 提交、文件校验和源码树哈希。最近一次核对显示端侧 Agent 与远端 `feat/m1-robot` 一致，Gateway、Qwen 后台和音频输入均为 `ready`。
+发布版本在 `/userdata/developer/audio-agent/releases/`，`run/active-release` 指向当前版本。每个版本的 `release-manifest.json` 记录 Git 提交、文件校验和源码树哈希。最近一次核对显示端侧运行源码树与仓库相同，Gateway、Qwen 后台和音频输入均为 `ready`。此文档的提交会推进仓库 HEAD，而不改变端侧运行源码；因此按完整 Git 提交号比较时会出现文档版本差异。
 
 在有机器人 SSH 访问权限的机器上查看状态：
 

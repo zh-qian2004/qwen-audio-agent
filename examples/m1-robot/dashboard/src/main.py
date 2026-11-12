@@ -81,6 +81,7 @@ class VolumeRequest(BaseModel):
 class AudioAgentHeartbeat(BaseModel):
     instance_id: str
     label: str | None = None
+    deployment_mode: str | None = None
     connector: dict = Field(default_factory=dict)
     gateway: dict = Field(default_factory=dict)
 

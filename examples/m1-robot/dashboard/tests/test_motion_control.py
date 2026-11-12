@@ -658,6 +658,23 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result["vendor_response"]["path"], "/BusinessAppReq_topic")
         self.assertEqual(published[0]["instruction"][0]["name"], "off-charger")
 
+    def test_get_off_car_uses_formal_business_workflow(self):
+        published = []
+        self.controller.business_publisher = lambda payload: (
+            published.append(payload) or json.dumps(payload)
+        )
+        self.store.observation.update({
+            "is_on_car": 1, "is_on_charger": 0, "is_charging": False,
+        })
+        result = self.controller.command("get_off_car", str(uuid.uuid4()), "test", "unit")
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["vendor_response"]["path"], "/BusinessAppReq_topic")
+        self.assertEqual(published, [{
+            "type": "instruction",
+            "instruction": [{"name": "on-off-car", "param": {"type": "get-off"}}],
+        }])
+        self.assertEqual(self.vendor.calls, [])
+
     def test_charge_preconditions_reject_wrong_state(self):
         self.store.observation.update({
             "is_on_car": 0, "is_on_charger": 0, "is_charging": False,
@@ -665,6 +682,37 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(MotionControlError) as context:
             self.controller.command("return_to_charge", str(uuid.uuid4()), "test", "unit")
         self.assertEqual(context.exception.code, "precondition_failed")
+
+    def test_wheeled_mode_blocks_rotate_before_vendor_dispatch(self):
+        self.store.observation["is_on_car"] = 1
+        for command_id in ("rotate_left", "rotate_right"):
+            with self.subTest(command_id=command_id):
+                with self.assertRaises(MotionControlError) as context:
+                    self.controller.command(command_id, str(uuid.uuid4()), "test", "unit")
+                self.assertEqual(context.exception.code, "unsupported_in_wheeled_mode")
+        self.assertEqual(self.vendor.calls, [])
+
+    def test_wheeled_mode_allows_forward_and_lateral_motion(self):
+        self.store.observation["is_on_car"] = 1
+        for command_id, vendor_command in (
+            ("move_forward", "MOVE_FORWARD"),
+            ("strafe_left", "STRAFE_LEFT"),
+            ("strafe_right", "STRAFE_RIGHT"),
+        ):
+            with self.subTest(command_id=command_id):
+                result = self.controller.command(
+                    command_id, str(uuid.uuid4()), "test", "unit", duration_seconds=0.2,
+                )
+                self.assertTrue(result["accepted"])
+                self.assertIn(("command", vendor_command), self.vendor.calls)
+                self.controller.stop("test cleanup", "unit")
+
+    def test_unknown_mount_state_fails_closed_for_rotate_motion(self):
+        self.store.observation["is_on_car"] = None
+        with self.assertRaises(MotionControlError) as context:
+            self.controller.command("rotate_left", str(uuid.uuid4()), "test", "unit")
+        self.assertEqual(context.exception.code, "state_unknown")
+        self.assertEqual(self.vendor.calls, [])
 
     def test_fall_gate_blocks_base_motion(self):
         self.store.observation["fall_state"] = 1

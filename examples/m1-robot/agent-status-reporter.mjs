@@ -24,13 +24,13 @@ export function publicGatewayHealth(health = {}) {
 }
 
 export class AgentStatusReporter {
-  constructor({ dashboard, healthUrl, accessToken = '', instanceId, label,
+  constructor({ dashboard, healthUrl, accessToken = '', instanceId, label, deploymentMode = '',
     connectorStatus, intervalMs = 2_000, fetchImpl = globalThis.fetch, onStatus = () => {} } = {}) {
     if (!dashboard || !healthUrl || !instanceId || typeof connectorStatus !== 'function') {
       throw new TypeError('AgentStatusReporter configuration is incomplete')
     }
     Object.assign(this, {
-      dashboard, healthUrl, accessToken, instanceId, label, connectorStatus,
+      dashboard, healthUrl, accessToken, instanceId, label, deploymentMode, connectorStatus,
       intervalMs, fetchImpl, onStatus,
     })
     this.timer = null
@@ -63,6 +63,7 @@ export class AgentStatusReporter {
       await this.dashboard.audioAgentHeartbeat({
         instance_id: this.instanceId,
         label: this.label,
+        deployment_mode: this.deploymentMode,
         connector: this.connectorStatus(),
         gateway,
       })

@@ -19,7 +19,7 @@ test('reporter posts connector and Gateway status to Dashboard', async () => {
   const reporter = new AgentStatusReporter({
     dashboard: { audioAgentHeartbeat: async value => heartbeats.push(value) },
     healthUrl: 'http://gateway/api/health',
-    instanceId: 'm1-primary', label: 'M1 Robot',
+    instanceId: 'm1-primary', label: 'M1 Robot', deploymentMode: 'edge',
     connectorStatus: () => ({ gateway: { state: 'ready' } }),
     fetchImpl: async () => ({ ok: true, json: async () => ({
       status: 'ready', realtimeProvider: 'dashscope', realtimeModel: 'qwen-audio-realtime',
@@ -29,6 +29,7 @@ test('reporter posts connector and Gateway status to Dashboard', async () => {
   await reporter.report()
   assert.equal(heartbeats.length, 1)
   assert.equal(heartbeats[0].instance_id, 'm1-primary')
+  assert.equal(heartbeats[0].deployment_mode, 'edge')
   assert.equal(heartbeats[0].connector.gateway.state, 'ready')
   assert.equal(heartbeats[0].gateway.backend.model, 'qwen3')
 })

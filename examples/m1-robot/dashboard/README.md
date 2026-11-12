@@ -28,7 +28,7 @@
 | 分类 | 命令 |
 |---|---|
 | 方向运动（hold） | `MOVE_FORWARD` `MOVE_BACKWARD` `STRAFE_LEFT` `STRAFE_RIGHT` `ROTATE_LEFT` `ROTATE_RIGHT`，`MOTION_STOP` 为单次停止 |
-| 身体动作 | `GET_UP` `BEND_WAIST` `STRAIGHTEN_WAIST`；上下车仅保留正式流程 `VISUAL_GET_ON_CAR`（上车）和 `GET_OFF_CAR`（下车） |
+| 身体动作 | `GET_UP` `BEND_WAIST` `STRAIGHTEN_WAIST`；上下车仅保留正式流程 `VISUAL_GET_ON_CAR`（上车）和 `/BusinessAppReq_topic` 的 `on-off-car/get-off`（下车） |
 | 头部与手臂 | `HEAD_UP` `HEAD_RESET` `WAVE_HAND` `HAND_RESET` |
 | 充电业务 | `RETURN_TO_CHARGE`（完整回充行为树）与 `OFF_CHARGER`（通过 `/BusinessAppReq_topic` 的 `off-charger` 指令执行正式下桩流程） |
 | 其他业务动作（已停用） | `ENTER_PRESENTATION_MODE` `SELF_INTRODUCTION` `ME_TOO_HAPPY`；保留在目录中但 `dashboard_enabled=false` |
@@ -38,7 +38,7 @@
 
 - `hold`：按下发送一次命令，松开发送 `MOTION_STOP`；后端另有最长按住保护（默认 5 秒，方向命令超时值），超时自动停止。
 - `trigger`：单次触发；`toggle`：模式切换；`workflow`：长任务，按 ROS 观测判断。
-- 高风险动作（上下小车、回充、复位）需要页面二次确认。`GET_ON_CAR` 是 gait 62 分腿/卡脚调试动作，不在 Dashboard 暴露。
+- 高风险动作（上下小车、回充、复位）需要页面二次确认。`GET_ON_CAR` 是 gait 62 分腿/卡脚调试动作；厂商 HTTP `GET_OFF_CAR` 是 gait 63 腿部解锁动作，二者均不作为 Dashboard 的正式上下车入口。
 - 回充与下充电桩已启用并需要页面二次确认；其他未验证业务动作仍返回 403。
 - 上/下小车、回充和下桩必须同时收到厂商业务成功事件与目标硬件状态，普通 ROS“运动后停止”不再被当作完成。
 - 后端只接受命令目录中的 `command_id`，不提供任意厂商命令透传。

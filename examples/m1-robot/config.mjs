@@ -49,6 +49,7 @@ export function loadM1Config(env = process.env) {
     outputCancelTimeoutMs: integer(env.M1_OUTPUT_CANCEL_TIMEOUT_MS, 2_000, { min: 100, max: 30_000 }),
     clientInstanceId: String(env.M1_CLIENT_INSTANCE_ID || 'm1-robot-primary').trim(),
     clientLabel: String(env.M1_CLIENT_LABEL || 'M1 Robot').trim(),
+    deploymentMode: String(env.M1_AGENT_DEPLOYMENT_MODE || '').trim(),
     locale: String(env.M1_LOCALE || 'zh-CN').trim(),
     timeZone: String(env.M1_TIME_ZONE || 'Asia/Shanghai').trim(),
     halfDuplex: env.M1_HALF_DUPLEX !== '0',

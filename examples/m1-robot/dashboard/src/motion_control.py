@@ -370,6 +370,19 @@ class MotionController:
                     f"command requires {key}={expected}, current value is {actual}",
                     409, "precondition_failed",
                 )
+        for key, forbidden in (command_def.get("forbidden_state") or {}).items():
+            actual = observation.get(key)
+            if actual is None:
+                raise MotionControlError(
+                    f"cannot verify forbidden robot state {key}={forbidden}",
+                    409, "state_unknown",
+                )
+            if actual == forbidden:
+                raise MotionControlError(
+                    command_def.get("forbidden_state_message")
+                    or f"command is unavailable when {key}={forbidden}",
+                    409, command_def.get("forbidden_state_code") or "precondition_failed",
+                )
         fall_state = observation.get("fall_state")
         effect = command_def.get("physical_effect") or {}
         if fall_state not in (None, 0) and (effect.get("legs") or effect.get("base")) \

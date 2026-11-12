@@ -7,6 +7,18 @@ import time
 from typing import Any, Dict, Optional
 
 
+def deployment_mode(payload: Dict[str, Any]) -> str:
+    explicit = payload.get("deployment_mode")
+    if explicit in ("cloud", "edge"):
+        return explicit
+    # The existing Windows Connector predates this field.
+    if payload.get("instance_id") == "m1-robot-primary":
+        return "cloud"
+    if payload.get("instance_id") == "m1-robot-edge-candidate":
+        return "edge"
+    return "unknown"
+
+
 class AudioAgentStatus:
     """Keep the latest connector heartbeat without persisting runtime details."""
 
@@ -51,6 +63,7 @@ class AudioAgentStatus:
             "age_seconds": round(age, 3),
             "stale_after_seconds": self.stale_after_seconds,
             "instance_id": payload.get("instance_id"),
+            "deployment_mode": deployment_mode(payload),
             "label": payload.get("label") or "M1 Audio Agent",
             "connector": connector,
             "gateway": gateway,
@@ -74,6 +87,7 @@ class AudioAgentStatus:
             "implementation": status.get("label") or "Qwen Audio Agent",
             "metrics": [
                 {"label": "Gateway", "value": (status.get("connector", {}).get("gateway") or {}).get("state") or "—"},
+                {"label": "部署位置", "value": {"cloud": "云端", "edge": "端侧"}.get(status["deployment_mode"], "未标记")},
                 {"label": "语音客户端", "value": voice_clients.get("connected")},
                 {"label": "心跳延迟", "value": status.get("age_seconds"), "unit": "s"},
             ],
@@ -87,6 +101,7 @@ class AudioAgentStatus:
             "age_seconds": None,
             "stale_after_seconds": self.stale_after_seconds,
             "instance_id": None,
+            "deployment_mode": "unknown",
             "label": "M1 Audio Agent",
             "connector": {},
             "gateway": {},

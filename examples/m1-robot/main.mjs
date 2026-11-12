@@ -145,6 +145,7 @@ const statusReporter = new AgentStatusReporter({
   accessToken: config.gatewayAccessToken,
   instanceId: config.clientInstanceId,
   label: config.clientLabel,
+  deploymentMode: config.deploymentMode,
   intervalMs: config.agentStatusIntervalMs,
   connectorStatus: () => structuredClone(componentStatus),
   onStatus: logStatus,

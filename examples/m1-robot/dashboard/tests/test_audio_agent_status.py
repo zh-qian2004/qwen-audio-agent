@@ -33,15 +33,30 @@ class AudioAgentStatusTests(unittest.TestCase):
 
         self.assertTrue(result["online"])
         self.assertEqual(result["state"], "online")
+        self.assertEqual(result["deployment_mode"], "cloud")
         card = status.service_card()
         self.assertEqual(card["status"], "online")
         self.assertIn("qwen-audio-realtime", card["detail"])
         self.assertIn("qwen3", card["detail"])
+        self.assertIn({"label": "部署位置", "value": "云端"}, card["metrics"])
+
+    def test_explicit_edge_heartbeat(self):
+        status = AudioAgentStatus()
+        heartbeat = {**HEARTBEAT, "deployment_mode": "edge"}
+        result = status.update(heartbeat)
+        self.assertEqual(result["deployment_mode"], "edge")
+        self.assertIn({"label": "部署位置", "value": "端侧"}, status.service_card()["metrics"])
+
+    def test_unknown_instance_is_not_guessed(self):
+        status = AudioAgentStatus()
+        result = status.update({**HEARTBEAT, "instance_id": "another-agent"})
+        self.assertEqual(result["deployment_mode"], "unknown")
 
     def test_missing_heartbeat_is_offline(self):
         result = AudioAgentStatus().snapshot()
         self.assertFalse(result["online"])
         self.assertEqual(result["state"], "offline")
+        self.assertEqual(result["deployment_mode"], "unknown")
 
     def test_old_heartbeat_is_stale(self):
         status = AudioAgentStatus(stale_after_seconds=1)

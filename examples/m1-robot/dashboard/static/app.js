@@ -513,8 +513,9 @@ function applyAudioServices(data) {
   const agent = data.audio_agent || {};
   const realtime = agent.gateway?.realtime || {};
   const backend = agent.gateway?.backend || {};
+  const deployment = { cloud: "云端", edge: "端侧" }[agent.deployment_mode] || "未标记";
   text("audio-agent-state", audioServiceStatusLabel(agent.state));
-  text("audio-agent-models", `${realtime.model || realtime.provider || "前台未连接"} / ${backend.model || backend.label || backend.kind || "后台未配置"}`);
+  text("audio-agent-models", `${deployment} · ${realtime.model || realtime.provider || "前台未连接"} / ${backend.model || backend.label || backend.kind || "后台未配置"}`);
   renderAudioServiceList(data.services);
   renderAudioServiceConnections(data.connections);
   renderAudioServiceSessions(data.sessions, data.available_types);

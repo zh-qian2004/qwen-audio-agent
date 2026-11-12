@@ -137,6 +137,9 @@
       "timeout_seconds": 5,
       "verification_state": "vendor_confirmed",
       "feedback_sources": ["/ControlBipedMotionFeedback_topic", "/HardwareVehicleFeedback_topic"],
+      "forbidden_state": {"is_on_car": true},
+      "forbidden_state_code": "unsupported_in_wheeled_mode",
+      "forbidden_state_message": "原地左转在轮式小车模式下不可用；请先下车切换到双足模式。",
       "risk": "medium",
       "dashboard_enabled": true,
       "hardware_verified": false,
@@ -154,6 +157,9 @@
       "timeout_seconds": 5,
       "verification_state": "vendor_confirmed",
       "feedback_sources": ["/ControlBipedMotionFeedback_topic", "/HardwareVehicleFeedback_topic"],
+      "forbidden_state": {"is_on_car": true},
+      "forbidden_state_code": "unsupported_in_wheeled_mode",
+      "forbidden_state_message": "原地右转在轮式小车模式下不可用；请先下车切换到双足模式。",
       "risk": "medium",
       "dashboard_enabled": true,
       "hardware_verified": false,
@@ -232,12 +238,14 @@
       "dashboard_enabled": true,
       "hardware_verified": false,
       "vehicle_transition": "dismount",
+      "transport": "business_app_topic",
+      "business_request": {"type": "instruction", "instruction": [{"name": "on-off-car", "param": {"type": "get-off"}}]},
       "required_state": {"is_on_car": true, "is_on_charger": 0},
       "completion_signal": {
         "event": {"type": "get_on_off_car_status", "action": "get_off_car", "status": "success"},
         "state": {"is_on_car": 0}
       },
-      "notes": "唯一的正式下车入口；执行厂商 GET_OFF_CAR 流程。成功必须以 is_on_car=0、小车信号消失且控制器回到 Bipedal_Movement_mode 为准。"
+      "notes": "唯一的正式下车入口；通过 /BusinessAppReq_topic 的 on-off-car/get-off 指令执行 GetOffCarAtomic 完整流程。厂商 HTTP GET_OFF_CAR 只会发送 gait 63 解锁腿部，禁止作为下车入口。成功必须以 get_off_car/success、is_on_car=0、小车信号消失且控制器回到 Bipedal_Movement_mode 为准。"
     },
     {
       "id": "bend_waist",

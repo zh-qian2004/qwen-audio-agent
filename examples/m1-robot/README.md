@@ -29,7 +29,8 @@ Components:
   Agent status.
 - [`vision_service/`](vision_service/): visual processors and normalized
   detection results.
-- [`deploy/`](deploy/): robot startup assets and vendor patches.
+- [`deploy/`](deploy/README.md): robot startup assets, vendor patches, and the
+  current edge-Agent deployment record.
 - [`docs/`](docs/): control-interface and hardware-validation notes.
 
 The one-command launcher also injects `backend-mcp.mjs` into backend Agent

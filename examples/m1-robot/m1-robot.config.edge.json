@@ -1,0 +1,26 @@
+{
+  "ssh": { "enabled": false },
+  "gateway": {
+    "startLocal": true,
+    "buildBeforeStart": false,
+    "reuseExisting": false,
+    "url": "ws://127.0.0.1:18889/api/realtime?sessionId=debug-20261112-2310",
+    "frontendProfile": "./profile/frontend-profile.json",
+    "environment": {
+      "QWEN_AUDIO_MEMORY_CONTEXT_ENABLED": "false"
+    }
+  },
+  "connector": {
+    "audioServiceOrigin": "http://127.0.0.1:8091",
+    "dashboardUrl": "http://127.0.0.1:8080",
+    "halfDuplex": false,
+    "clientInstanceId": "m1-robot-edge-candidate",
+    "clientLabel": "M1 Robot Edge Candidate",
+    "locale": "zh-CN",
+    "timeZone": "Asia/Shanghai",
+    "environment": {
+      "M1_AGENT_DEPLOYMENT_MODE": "edge",
+      "M1_AUDIO_INPUT_URL": "ws://127.0.0.1:8093/ws/audio/input?delivery=continuous&pre_roll_ms=0"
+    }
+  }
+}

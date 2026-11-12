@@ -238,9 +238,11 @@ function summarizeDetections(payload) {
 }
 
 export class M1RobotTools {
-  constructor({ dashboard, maxMoveMs = 3_000, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  constructor({ dashboard, speakers = null, maxMoveMs = 3_000,
+    delay = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
     if (!dashboard) throw new TypeError('dashboard is required')
     this.dashboard = dashboard
+    this.speakers = speakers
     this.maxMoveMs = maxMoveMs
     this.delay = delay
     this.commands = []
@@ -302,6 +304,30 @@ export class M1RobotTools {
         additionalProperties: false,
       }),
     ]
+    if (this.speakers) {
+      definitions.push(
+        tool('m1_get_speaker', '按对话轮次查询后台声纹结果。仅用户询问发言者身份时调用，正常对话不要每轮调用。current 查询当前提问者；previous 查询上一轮用户发言；turn_id 精确指定轮次；search 按 query 查找历史原话（不含当前问题，多个匹配需澄清）。问“刚才数数的人是谁”应查数数那轮，不能拿当前提问者身份代替。只信 verified；unknown 表示无法确认；pending 尚在处理，不要猜测；unavailable 缺少证据。默认不朗读分数或毫秒等诊断字段。', {
+          type: 'object',
+          properties: {
+            target: { type: 'string', enum: ['current', 'previous', 'search'], default: 'current' },
+            turn_id: { type: 'string', description: '精确轮次 ID，提供后优先于 target。' },
+            query: { type: 'string', description: 'search 时提供要找的历史原话片段；匹配不唯一时工具返回候选。' },
+          },
+          additionalProperties: false,
+        }),
+        tool('m1_manage_speaker', '管理声纹档案。enroll：提供 display_name 即可，系统自动生成 speaker_id；未提供名字或 ID 时先询问姓名并等待。必须等工具返回 active=true 才告诉用户采集已开始，尚不能宣称注册成功；服务收集足够人声后自动完成。参数错误应按工具详情解释并补齐参数，同样参数不要重试。cancel_enrollment 取消采集；list 列出档案；delete 按用户要求删除指定 ID。', {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['enroll', 'cancel_enrollment', 'list', 'delete'] },
+            speaker_id: { type: 'string', minLength: 1, maxLength: 80, description: '注册时可省略，由系统生成；删除时必填。明确重录旧档案时才复用旧 ID。' },
+            display_name: { type: 'string', maxLength: 120, description: '注册新说话人时提供用户给出的姓名，例如豆包。' },
+            role: { type: 'string', maxLength: 40, default: 'guest', description: '例如 owner、family 或 guest' },
+          },
+          required: ['action'],
+          additionalProperties: false,
+        }),
+      )
+    }
     const vehicleActionSchema = {
       type: 'object',
       properties: {
@@ -362,6 +388,8 @@ export class M1RobotTools {
       else if (name === 'm1_get_vehicle_status') output = await this.dashboard.vehicleStatus()
       else if (name === 'm1_get_vision_status') output = summarizeVisionStatus(await this.dashboard.visionStatus())
       else if (name === 'm1_get_detections') output = summarizeDetections(await this.dashboard.visionDetections())
+      else if (name === 'm1_get_speaker' && this.speakers) output = this.speakers.querySpeaker(args)
+      else if (name === 'm1_manage_speaker' && this.speakers) output = await this.speakers.manage(args)
       else if (name === 'm1_list_actions') output = { commands: this.commands }
       else if (name === 'm1_execute_action') output = await this.#executeAction(args)
       else if (Object.hasOwn(VEHICLE_ACTIONS, name)) output = await this.#executeVehicleAction(name, args)
@@ -376,7 +404,7 @@ export class M1RobotTools {
       return {
         status: 'failed',
         error: {
-          code: error instanceof DashboardError ? error.code : 'm1_tool_failed',
+          code: error instanceof DashboardError ? error.code : error?.code || 'm1_tool_failed',
           message: error?.message || String(error),
           ...(error?.detail === undefined ? {} : { detail: error.detail }),
         },

@@ -142,6 +142,37 @@ test('vision tools expose health and compact semantic detections', async () => {
   assert.equal(detections.output.detections[1].position, 'center')
 })
 
+test('speaker tools expose only current identity and unified profile management', async () => {
+  const calls = []
+  const speakers = {
+    querySpeaker: args => ({ status: 'verified', speaker_id: 'owner', target: args.target }),
+    manage: async args => { calls.push(args); return { ok: true, ...args } },
+  }
+  const tools = new M1RobotTools({ dashboard: fakeDashboard(), speakers })
+  await tools.initialize()
+  const definitions = new Map(tools.definitions().map(item => [item.name, item]))
+  for (const name of ['m1_get_speaker', 'm1_manage_speaker']) {
+    assert.ok(definitions.has(name), `${name} should be registered`)
+  }
+  for (const name of [
+    'm1_speaker_status', 'm1_speaker_list', 'm1_speaker_enroll_start',
+    'm1_speaker_enroll_finish', 'm1_speaker_enroll_cancel', 'm1_speaker_delete',
+  ]) assert.equal(definitions.has(name), false, `${name} should not be model-visible`)
+  assert.equal(definitions.has('m1_get_current_speaker'), false)
+  assert.match(definitions.get('m1_get_speaker').description, /不要每轮调用/)
+  assert.match(definitions.get('m1_manage_speaker').description, /自动完成/)
+
+  const current = await tools.handle({ name: 'm1_get_speaker', arguments: { target: 'previous' } })
+  assert.equal(current.output.speaker_id, 'owner')
+  assert.equal(current.output.target, 'previous')
+  const managed = await tools.handle({
+    name: 'm1_manage_speaker',
+    arguments: { action: 'enroll', speaker_id: 'family', display_name: '家人', role: 'family' },
+  })
+  assert.equal(managed.status, 'completed')
+  assert.deepEqual(calls, [{ action: 'enroll', speaker_id: 'family', display_name: '家人', role: 'family' }])
+})
+
 test('bounded movement returns immediately and delegates its deadline to Dashboard', async () => {
   const dashboard = fakeDashboard()
   const tools = new M1RobotTools({ dashboard, maxMoveMs: 250 })

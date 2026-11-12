@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { WebSocket } from 'ws'
+import { join } from 'node:path'
 import { GatewayClient } from '../../shared/gateway/client-sdk.mjs'
-import { GatewayClientCapability } from '../../shared/protocol/gateway-client-protocol.mjs'
+import {
+  GatewayClientCapability,
+} from '../../shared/protocol/gateway-client-protocol.mjs'
 import { createLogger } from '../../shared/logger.mjs'
 import { resolveRuntimePaths } from '../../shared/runtime-paths.mjs'
 import { loadM1Config } from './config.mjs'
@@ -11,6 +14,7 @@ import {
   AudioInputForwarder, AudioOutputBridge, M1AudioBridge, RemoteClockEstimator,
 } from './audio-service-bridge.mjs'
 import { AgentStatusReporter } from './agent-status-reporter.mjs'
+import { SpeakerIdentityBridge } from './speaker-identity.mjs'
 import { VendorEventForwarder } from './vendor-event-bridge.mjs'
 import { acquireM1ConnectorInstance } from './instance-lock.mjs'
 
@@ -31,7 +35,21 @@ const dashboard = new DashboardClient({
   baseUrl: config.dashboardUrl,
   timeoutMs: config.dashboardTimeoutMs,
 })
-const robotTools = new M1RobotTools({ dashboard })
+let gateway
+const speakers = new SpeakerIdentityBridge({
+  baseUrl: config.speakerServiceOrigin,
+  eventUrl: config.speakerEventUrl,
+  WebSocketImpl: WebSocket,
+  fetchImpl: globalThis.fetch,
+  timeoutMs: config.speakerRequestTimeoutMs,
+  maxIdentityAgeMs: config.speakerIdentityMaxAgeMs,
+  reconnectMinMs: config.reconnectMinMs,
+  reconnectMaxMs: config.reconnectMaxMs,
+  turnStorePath: join(resolveRuntimePaths().stateDirectory, 'm1-speaker-turns.json'),
+  sessionId: new URL(config.gatewayUrl).searchParams.get('sessionId') || 'main',
+  onStatus: status => logStatus(status),
+})
+const robotTools = new M1RobotTools({ dashboard, speakers })
 
 try {
   await robotTools.initialize()
@@ -40,12 +58,12 @@ try {
   console.warn(`[m1] Dashboard capability discovery failed; control actions start unavailable: ${error.message}`)
 }
 
-let gateway
 let shuttingDown = false
 const componentStatus = {
   gateway: { state: 'starting' },
   audio_input: { state: 'starting' },
   audio_output: { state: 'idle' },
+  speaker_identity: { state: 'starting' },
   vendor_events: { state: 'starting' },
 }
 const logStatus = status => {
@@ -93,7 +111,7 @@ gateway = new GatewayClient({
   url: config.gatewayUrl,
   createSocket: (url, options) => new WebSocket(url, options),
   clientType: 'm1-robot',
-  clientVersion: '1.0.0',
+  clientVersion: '1.1.0',
   clientInstanceId: config.clientInstanceId,
   clientLabel: config.clientLabel,
   accessToken: config.gatewayAccessToken,
@@ -114,7 +132,10 @@ gateway = new GatewayClient({
   },
   reconnectMinMs: config.reconnectMinMs,
   reconnectMaxMs: config.reconnectMaxMs,
-  onEvent: event => audioBridge.handleGateway(event),
+  onEvent: event => {
+    speakers.observeGatewayEvent(event)
+    audioBridge.handleGateway(event)
+  },
   onAction: event => robotTools.handle(event),
   onStatus: status => {
     logStatus(status)
@@ -153,6 +174,7 @@ const statusReporter = new AgentStatusReporter({
 
 audioBridge.start()
 gateway.start()
+speakers.start()
 vendorEvents.start()
 statusReporter.start()
 
@@ -162,6 +184,7 @@ async function close(signal) {
   console.info(`[m1] shutting down on ${signal}`)
   statusReporter.stop()
   vendorEvents.stop()
+  speakers.stop()
   audioBridge.stop()
   gateway.stop()
   try { await robotTools.stopActive(`M1 connector shutdown: ${signal}`) }

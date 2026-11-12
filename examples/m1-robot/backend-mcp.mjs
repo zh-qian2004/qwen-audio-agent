@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { WebSocket } from 'ws'
+import { join } from 'node:path'
+import { resolveRuntimePaths } from '../../shared/runtime-paths.mjs'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -8,13 +11,32 @@ import {
 import { loadM1Config } from './config.mjs'
 import { DashboardClient } from './dashboard-client.mjs'
 import { M1RobotTools } from './robot-tools.mjs'
+import { SpeakerIdentityBridge } from './speaker-identity.mjs'
 
 const config = loadM1Config()
 const dashboard = new DashboardClient({
   baseUrl: config.dashboardUrl,
   timeoutMs: config.dashboardTimeoutMs,
 })
-const robotTools = new M1RobotTools({ dashboard })
+const speakers = new SpeakerIdentityBridge({
+  baseUrl: config.speakerServiceOrigin,
+  eventUrl: config.speakerEventUrl,
+  WebSocketImpl: WebSocket,
+  fetchImpl: globalThis.fetch,
+  timeoutMs: config.speakerRequestTimeoutMs,
+  maxIdentityAgeMs: config.speakerIdentityMaxAgeMs,
+  reconnectMinMs: config.reconnectMinMs,
+  reconnectMaxMs: config.reconnectMaxMs,
+  turnStorePath: join(resolveRuntimePaths().stateDirectory, 'm1-speaker-turns.json'),
+  sessionId: new URL(config.gatewayUrl).searchParams.get('sessionId') || 'main',
+  readOnlyTurnStore: true,
+  onStatus: status => {
+    if (['error', 'context_error'].includes(status.state)) {
+      console.error(`[m1-backend-mcp] speaker service ${status.state}: ${status.error?.message || status.error || 'unknown error'}`)
+    }
+  },
+})
+const robotTools = new M1RobotTools({ dashboard, speakers })
 
 try {
   await robotTools.initialize()
@@ -68,9 +90,11 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
 })
 
 const transport = new StdioServerTransport()
+speakers.start()
 await server.connect(transport)
 
 async function close() {
+  speakers.stop()
   try { await robotTools.stopActive('M1 backend MCP shutdown') } catch {}
   await server.close()
 }

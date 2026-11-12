@@ -44,7 +44,9 @@
     "timeZone": "Asia/Shanghai",
     "preflightTimeoutMs": 20000,
     "environment": {
-      "M1_AUDIO_INPUT_URL": "ws://127.0.0.1:18093/ws/audio/input?delivery=continuous&pre_roll_ms=0"
+      "M1_AUDIO_INPUT_URL": "ws://127.0.0.1:18093/ws/audio/input?delivery=continuous&pre_roll_ms=0",
+      "M1_SPEAKER_SERVICE_ORIGIN": "http://127.0.0.1:18093",
+      "M1_SPEAKER_EVENT_URL": "ws://127.0.0.1:18093/ws/speakers/events"
     }
   }
 }

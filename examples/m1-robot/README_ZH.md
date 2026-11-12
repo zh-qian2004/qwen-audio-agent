@@ -47,7 +47,8 @@ Node.js 版本须满足仓库根目录要求。模型 API Key、SSH 私钥和机
 
 ## 前置条件
 
-- 机器人上的 `audio_service` 已监听 `127.0.0.1:8091`。
+- 机器人上的 `audio_service` 已监听 `127.0.0.1:8091`，独立音频输入与声纹服务已监听
+  `127.0.0.1:8093`。
 - Dashboard 已监听 `127.0.0.1:8080`。
 - 需要视觉工具时，`vision_service` 已按其 README 启动。
 - Gateway 已配置可用的 Realtime Voice Frontend。
@@ -67,7 +68,7 @@ Node.js 版本须满足仓库根目录要求。模型 API Key、SSH 私钥和机
 ## 一键启动 Agent
 
 默认配置位于 `examples/m1-robot/m1-robot.config.json`，连接当前热点网络中的 M1，
-建立 `8091`、`8080` 的 SSH 转发，并启动本地 Gateway 与 Connector：
+建立 `8091`、`8093`、`8080` 的 SSH 转发，并启动本地 Gateway 与 Connector：
 
 ```powershell
 npm run start:m1-robot
@@ -116,7 +117,7 @@ npm run example:m1-robot
 ```
 
 如果 Gateway 运行在远程设备，而机器人服务只监听回环地址，可以使用 SSH 或
-Tailscale 隧道转发 `8091` 和 `8080`。长期部署可把 Connector 与 Gateway 部署在
+Tailscale 隧道转发 `8091`、`8093` 和 `8080`。长期部署可把 Connector 与 Gateway 部署在
 机器人 `/userdata`，直接访问本机服务并仅向云端模型建立出站连接。
 
 ## Agent 工具
@@ -125,6 +126,8 @@ Tailscale 隧道转发 `8091` 和 `8080`。长期部署可把 Connector 与 Gate
 - `m1_get_motion_status`
 - `m1_get_vision_status`
 - `m1_get_detections`
+- `m1_get_speaker`
+- `m1_manage_speaker`
 - `m1_list_actions`
 - `m1_execute_action`
 - `m1_move`
@@ -139,6 +142,17 @@ Tailscale 隧道转发 `8091` 和 `8080`。长期部署可把 Connector 与 Gate
 动作目录由 Connector 启动时从 Dashboard 发现。`m1_execute_action` 只暴露已启用、
 非 hold、无需额外确认的动作；方向运动统一由 `m1_move` 提交，计时和自动停止由
 Dashboard 持有。
+
+Connector 常驻订阅 `/ws/speakers/events`，声纹结果和转写存入后台逐轮记录，不向实时
+模型注入额外文本。`m1_get_speaker` 支持 current、previous、turn_id 和 search 查询，
+返回 verified、unknown、pending 或 unavailable；后台 Agent 读取同一份记录。
+缺少证据时不继承上一位身份，历史发言查询不以当前提问者身份代替。记录按 session
+隔离，最多保存 200 轮，位于 stateDirectory 下的 `m1-speaker-turns.json`。
+
+声纹管理收敛为 `m1_manage_speaker`。注册开始后，audio_service 从多个合格片段累计有效
+人声并自动完成，不再把 finish/status 等底层接口暴露给模型。注册数据由机器人
+audio_service 管理，Harness 不接收或保存声纹向量和原始注册 PCM；阈值、过滤原因和
+推理时延等诊断信息由 Dashboard/服务状态接口查看。
 
 运动命令返回 `operation_id`、`execution_state` 和 `completion_confirmed`。厂商 HTTP
 受理不等于物理动作已经完成；`completion_confirmed=false` 时必须通过
@@ -169,6 +183,7 @@ Dashboard 持有。
 
 - `/ws/audio/input`：麦克风 PCM 输入；
 - `/ws/audio/output`：Agent 实时音频输出；
+- `/ws/speakers/events`：说话人识别结果，仅在 Connector 内缓存供工具查询；
 - `/ws/vendor/events`：厂商事件与安全提示；
 - 音频取消接口：打断时停止旧播放并释放仲裁租约。
 

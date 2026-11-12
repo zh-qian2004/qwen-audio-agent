@@ -220,8 +220,9 @@ async function main() {
         args: [join(scriptDir, 'backend-mcp.mjs')],
         env: [
           { name: 'M1_DASHBOARD_URL', value: config.connector.dashboardUrl },
+          { name: 'M1_GATEWAY_URL', value: config.gateway.url },
           ...Object.entries(config.connector.environment)
-            .filter(([name]) => name.startsWith('M1_') && name !== 'M1_DASHBOARD_URL')
+            .filter(([name]) => name.startsWith('M1_') && !['M1_DASHBOARD_URL', 'M1_GATEWAY_URL'].includes(name))
             .map(([name, value]) => ({ name, value })),
         ],
       })

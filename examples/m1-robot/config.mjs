@@ -26,18 +26,37 @@ export function loadM1Config(env = process.env) {
   const defaultOutput = new URL('/ws/audio/output', audioUrl)
   const defaultVendorEvents = new URL('/ws/vendor/events', audioUrl)
   const defaultOutputCancel = new URL('/api/audio/output/cancel', audioOrigin)
+  const audioInputUrl = websocketUrl(env.M1_AUDIO_INPUT_URL || defaultInput, 'M1_AUDIO_INPUT_URL')
+  const speakerDefaultUrl = new URL(audioInputUrl)
+  speakerDefaultUrl.protocol = speakerDefaultUrl.protocol === 'wss:' ? 'https:' : 'http:'
+  speakerDefaultUrl.pathname = '/'
+  speakerDefaultUrl.search = ''
+  speakerDefaultUrl.hash = ''
+  const speakerServiceOrigin = httpUrl(
+    env.M1_SPEAKER_SERVICE_ORIGIN || speakerDefaultUrl,
+    'M1_SPEAKER_SERVICE_ORIGIN',
+  )
+  const speakerEventDefault = new URL('/ws/speakers/events', speakerServiceOrigin)
+  speakerEventDefault.protocol = speakerEventDefault.protocol === 'https:' ? 'wss:' : 'ws:'
 
   return {
     gatewayUrl,
     gatewayHealthUrl: gatewayHealthUrl.toString(),
     gatewayAccessToken: String(env.M1_GATEWAY_ACCESS_TOKEN || '').trim(),
-    audioInputUrl: websocketUrl(env.M1_AUDIO_INPUT_URL || defaultInput, 'M1_AUDIO_INPUT_URL'),
+    audioInputUrl,
     audioOutputUrl: websocketUrl(env.M1_AUDIO_OUTPUT_URL || defaultOutput, 'M1_AUDIO_OUTPUT_URL'),
     vendorEventUrl: websocketUrl(env.M1_VENDOR_EVENT_URL || defaultVendorEvents, 'M1_VENDOR_EVENT_URL'),
     audioOutputCancelUrl: httpUrl(
       env.M1_AUDIO_OUTPUT_CANCEL_URL || defaultOutputCancel,
       'M1_AUDIO_OUTPUT_CANCEL_URL',
     ),
+    speakerServiceOrigin,
+    speakerEventUrl: websocketUrl(
+      env.M1_SPEAKER_EVENT_URL || speakerEventDefault,
+      'M1_SPEAKER_EVENT_URL',
+    ),
+    speakerRequestTimeoutMs: integer(env.M1_SPEAKER_REQUEST_TIMEOUT_MS, 5_000, { min: 500, max: 60_000 }),
+    speakerIdentityMaxAgeMs: integer(env.M1_SPEAKER_IDENTITY_MAX_AGE_MS, 30_000, { min: 1_000, max: 600_000 }),
     dashboardUrl: httpUrl(env.M1_DASHBOARD_URL || 'http://127.0.0.1:8080', 'M1_DASHBOARD_URL'),
     dashboardTimeoutMs: integer(env.M1_DASHBOARD_TIMEOUT_MS, 8_000, { min: 500, max: 60_000 }),
     agentStatusIntervalMs: integer(env.M1_AGENT_STATUS_INTERVAL_MS, 2_000, { min: 500, max: 60_000 }),

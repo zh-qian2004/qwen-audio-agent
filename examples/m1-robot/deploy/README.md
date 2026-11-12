@@ -5,14 +5,16 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 机器人 | `root@192.168.137.132` |
-| 活动版本 | `edge-20261112-112640-d4bfab8-19be85da` |
-| 源码提交 | `d4bfab88cb067e81b758d5625e6f59ed57190e64` (`feat/m1-robot`，干净工作区) |
+| 活动版本 | `edge-20261112-151631-da525de-090ff110` |
+| 源码提交 | `da525de37f828398794e695624e1aa104cf6d456` (`feat/m1-robot`，含未提交的说话人 Harness 改动) |
 | Gateway | 机器人本机 `127.0.0.1:18889` |
 | 音频服务 | `/userdata/audio_service` |
 | Dashboard | `/userdata/developer/dashboard` |
 | 视觉服务 | `/userdata/developer/vision_service` |
 
-发布版本在 `/userdata/developer/audio-agent/releases/`，`run/active-release` 指向当前版本。每个版本的 `release-manifest.json` 记录 Git 提交、文件校验和源码树哈希。最近一次核对显示端侧运行源码树与仓库相同，Gateway、Qwen 后台和音频输入均为 `ready`。此文档的提交会推进仓库 HEAD，而不改变端侧运行源码；因此按完整 Git 提交号比较时会出现文档版本差异。
+发布版本在 `/userdata/developer/audio-agent/releases/`，`run/active-release` 指向当前版本。每个版本的 `release-manifest.json` 记录 Git 提交、文件校验和源码树哈希。当前源码树哈希为 `090ff110e3377278b71a1e7d8348572e6cbbefbb16ea01bfd9320fc2240e87e1`，manifest 标记 `sourceDirty=true`。后台声纹查询启用干净 session `debug-20261112-2310`。
+
+模型只暴露 `m1_get_speaker` 和 `m1_manage_speaker` 两个说话人工具，并订阅 `127.0.0.1:8093/ws/speakers/events`。识别结果存入后台 `run/m1-speaker-turns.json`，不再向模型注入声纹文本。前后台工具按具体轮次查询 verified、unknown、pending 或 unavailable；记录按 session 隔离。多片段声纹注册由 audio_service 自动完成，运行指标与阈值诊断留在 Dashboard/服务状态接口。
 
 在有机器人 SSH 访问权限的机器上查看状态：
 

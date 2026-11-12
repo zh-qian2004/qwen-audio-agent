@@ -9,6 +9,8 @@ export function replaySession(records, { sessionId } = {}) {
   const { header, events } = validateSessionLog(records, { sessionId })
   const messages = []
   const messageIndexes = new Map()
+  const speakerAnnotationsByTurn = new Map()
+  const speakerAnnotationsByMessage = new Map()
   const tasks = new Map()
   const deliveries = []
   for (const event of events) {
@@ -27,12 +29,28 @@ export function replaySession(records, { sessionId } = {}) {
           ? Date.parse(event.time)
           : 0,
       }
+      const speaker = speakerAnnotationsByMessage.get(messageId)
+        || speakerAnnotationsByTurn.get(String(event.turnId || ''))
+      if (speaker) message.speaker = { ...speaker }
       const existingIndex = messageId ? messageIndexes.get(messageId) : undefined
       if (existingIndex === undefined) {
         if (messageId) messageIndexes.set(messageId, messages.length)
         messages.push(message)
       } else {
         messages[existingIndex] = { ...messages[existingIndex], ...message }
+      }
+    }
+    if (event.type === 'speaker/annotation' && event.payload?.speaker) {
+      const turnId = String(event.turnId || '')
+      const messageId = String(event.payload.messageId || '')
+      const speaker = { ...event.payload.speaker }
+      if (turnId) speakerAnnotationsByTurn.set(turnId, speaker)
+      if (messageId) speakerAnnotationsByMessage.set(messageId, speaker)
+      const index = messageId
+        ? messageIndexes.get(messageId)
+        : messages.findIndex(message => message.turnId === turnId && message.role === 'user')
+      if (index !== undefined && index >= 0) {
+        messages[index] = { ...messages[index], speaker }
       }
     }
     if (event.type === 'qwaudio/task/event' && event.taskId && event.payload?.task) {

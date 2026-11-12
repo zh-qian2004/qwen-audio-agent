@@ -281,6 +281,9 @@ export const config = {
   memoryProvider: normalizeMemoryProviderSelection(
     process.env.QWEN_AUDIO_MEMORY_PROVIDER,
   ),
+  memoryContextEnabled: featureEnabled(
+    process.env.QWEN_AUDIO_MEMORY_CONTEXT_ENABLED,
+  ),
   voiceMemStateDirectory: process.env.VOICEMEM_STATE_DIR
     ? resolve(root, process.env.VOICEMEM_STATE_DIR)
     : resolve(runtimeEnvironment.dataDirectory, 'memory/voicemem'),

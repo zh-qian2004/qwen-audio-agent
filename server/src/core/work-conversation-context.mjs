@@ -17,7 +17,11 @@ function budget(value) {
 }
 
 function line(message) {
-  return `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`
+  const speaker = message.role === 'user' ? message.speaker : null
+  const speakerTag = speaker
+    ? `<speaker status=${JSON.stringify(speaker.status || 'unknown')} speaker_id=${JSON.stringify(speaker.speaker_id || null)} display_name=${JSON.stringify(speaker.display_name || null)}>`
+    : ''
+  return `${speakerTag}${speakerTag ? '\n' : ''}${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`
 }
 
 function truncate(value, limit) {
@@ -86,6 +90,7 @@ export function captureCoordinatorConversation(messages = [], {
     role: message.role,
     content: String(message.content),
     position: message.historyPosition,
+    ...(message.speaker ? { speaker: { ...message.speaker } } : {}),
   }))
   const selected = recentMessages(eligible, limit)
   return {

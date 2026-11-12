@@ -9,6 +9,7 @@ import {
   ClientEventRoutingError,
   GatewayEventRouter,
 } from '../src/client/client-event-router.mjs'
+import { speakerAnnotationDefinition } from '../src/client/speaker-annotation.mjs'
 
 const source = Object.freeze({
   ownerId: 'owner-1',
@@ -221,4 +222,45 @@ test('passes host-supplied deterministic effects to an extension handler', async
   })
 
   assert.equal(handled, 'profile:brief')
+})
+
+test('speaker annotations are validated, persisted through a host effect and injected as silent context', async () => {
+  let annotation = null
+  const router = new GatewayEventRouter({
+    registry: new ClientEventDefinitionRegistry({
+      definitions: [speakerAnnotationDefinition()],
+    }),
+  })
+  const result = await router.publish({
+    event_id: 'speaker-turn-1',
+    name: 'speaker.annotation',
+    delivery_hint: 'context',
+    data: {
+      turn_id: 'turn-1',
+      message_id: 'voice:user:turn-1',
+      transcript: '帮我看看天气',
+      status: 'verified',
+      speaker_id: 'xiaoming',
+      display_name: '小明',
+      confidence: 0.84,
+      revision: 1,
+    },
+  }, {
+    source,
+    effects: { annotateSpeaker: value => { annotation = value } },
+  })
+
+  assert.equal(annotation.speaker_id, 'xiaoming')
+  assert.equal(result.delivery.mode, 'context')
+  assert.equal(result.delivery.presentation.contextTiming, 'immediate')
+  assert.match(result.delivery.text, /<speaker_annotation>/u)
+  assert.match(result.delivery.text, /不是用户的新请求/u)
+  await assert.rejects(router.publish({
+    event_id: 'speaker-invalid',
+    name: 'speaker.annotation',
+    data: {
+      turn_id: 'turn-2', message_id: 'voice:user:turn-2', transcript: '你好',
+      status: 'verified', speaker_id: null,
+    },
+  }, { source }), error => error.code === 'client_event_invalid')
 })

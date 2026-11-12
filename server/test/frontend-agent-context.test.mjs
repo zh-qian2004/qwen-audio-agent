@@ -69,6 +69,22 @@ test('builds bounded recent conversation separately from system instructions', (
   assert.match(recent, /助手: 正在继续处理/)
 })
 
+test('renders verified and unknown speaker metadata as structured history tags', () => {
+  const recent = buildRecentConversationContext([
+    {
+      role: 'user', content: '帮我看看天气',
+      speaker: { status: 'verified', speaker_id: 'xiaoming', display_name: '小明', confidence: 0.82 },
+    },
+    {
+      role: 'user', content: '再说一遍',
+      speaker: { status: 'unknown', speaker_id: null, confidence: 0.31 },
+    },
+  ])
+
+  assert.match(recent, /<speaker status="verified" speaker_id="xiaoming" display_name="小明" confidence=0\.82>/u)
+  assert.match(recent, /<speaker status="unknown" speaker_id=null display_name=null confidence=0\.31>/u)
+})
+
 test('describes prior input references without embedding their file data', () => {
   const recent = buildRecentConversationContext([{
     role: 'user',

@@ -123,6 +123,12 @@ export function createRealtimeSessionRuntime({
   let playbackReceipts = true
   let descriptor = { type: 'unknown', instanceId: null }
   let responseTurnCandidate = null
+  // A shared owner-scoped memory is unsafe for a multi-speaker robot: until
+  // memory is keyed by verified speaker_id, an M1 deployment can disable both
+  // memory context and its write tool without disabling durable session history.
+  const frontendMemoryService = config.memoryContextEnabled === false
+    ? null
+    : memoryService
   let responseStartWatchdog = null
   let permissionResponseTimer = null
   let sleeping = false
@@ -197,14 +203,14 @@ export function createRealtimeSessionRuntime({
         backendAvailability,
         frontendRetrieval,
         frontendKnowledge,
-        memoryService,
+        memoryService: frontendMemoryService,
         sessionDigests,
         permissionPending: taskCoordinator.hasPendingPermission(),
         inputPending: taskCoordinator.hasPendingInput(),
       }),
       tools: frontendSourceToolDefinitions(sessionToolSources),
     },
-    memories: memoryService?.list(ownerId, { limit: 64 }) || [],
+    memories: frontendMemoryService?.list(ownerId, { limit: 64 }) || [],
     recentMessages: frontendRecentMessages(),
     ...(sessionAssistantProfile
       ? { assistantProfile: sessionAssistantProfile }
@@ -393,14 +399,14 @@ export function createRealtimeSessionRuntime({
   // the owner's live memory snapshot after persistence, including deletion.
   // Same-session tool writes already return the new documents to the model;
   // retain their existing cache-only path to avoid a redundant prompt update.
-  const unsubscribeMemory = typeof memoryService?.subscribe === 'function'
-    ? memoryService.subscribe(event => {
+  const unsubscribeMemory = typeof frontendMemoryService?.subscribe === 'function'
+    ? frontendMemoryService.subscribe(event => {
         if (event.ownerId !== ownerId) return
         // Persistence changes invalidate the client view regardless of their
         // source or whether this session needs a model-instruction refresh.
         emit({ type: GatewayServerEvent.MEMORY_CHANGED })
         realtimeSession.updateAgentContext({
-          memories: memoryService.list(ownerId, { limit: 64 }),
+          memories: frontendMemoryService.list(ownerId, { limit: 64 }),
         }, {
           refreshSession: event.source !== 'realtime-tool' || event.sessionId !== sessionId,
         })
@@ -415,7 +421,7 @@ export function createRealtimeSessionRuntime({
     getFrontend: () => realtimeSession.frontend,
     getTurnId: () => turns.committedTurnId,
     getTurnGeneration: () => turns.committedTurnGeneration,
-    memoryService,
+    memoryService: frontendMemoryService,
     notesStore,
     getClientContext: () => clientContext,
     getConversationContext: () => conversationSync.frontendContext({
@@ -427,9 +433,9 @@ export function createRealtimeSessionRuntime({
     // 不必靠 instructions 再讲一遍。新值在下一个新会话生效。
     onMemoryChanged: () => {
       realtimeSession.updateAgentContext({
-        memories: memoryService?.list(ownerId, { limit: 64 }) || [],
+        memories: frontendMemoryService?.list(ownerId, { limit: 64 }) || [],
       }, { refreshSession: false })
-      if (typeof memoryService?.subscribe !== 'function') {
+      if (typeof frontendMemoryService?.subscribe !== 'function') {
         emit({ type: GatewayServerEvent.MEMORY_CHANGED })
       }
     },
@@ -1247,6 +1253,27 @@ export function createRealtimeSessionRuntime({
       inputActive: inputEnabled && !inputSuspended && !sleeping && !closed && voiceAccess.isActive(),
     }),
     updateOutputVoice: updateSessionOutputVoice,
+    annotateSpeaker(annotation = {}) {
+      if (closed) return null
+      const speaker = conversationSync.annotateSpeaker({
+        ownerId,
+        sessionId,
+        turnId: annotation.turn_id,
+        messageId: annotation.message_id,
+        speaker: annotation,
+      })
+      if (!speaker) return null
+      realtimeSession.updateAgentContext({
+        recentMessages: frontendRecentMessages(),
+      }, { refreshSession: false })
+      connectionLogger.info('speaker.annotation_recorded', {
+        turnId: annotation.turn_id,
+        status: speaker.status,
+        speakerId: speaker.speaker_id,
+        confidence: speaker.confidence,
+      })
+      return speaker
+    },
     setAssistantProfile(profile) {
       if (closed) return
       sessionAssistantProfile = String(profile || '').trim()

@@ -419,3 +419,43 @@ test('pending records require an object consumer and do not allocate absent sess
   batch.consume()
   assert.equal(sync.sessions.size, 0)
 })
+
+test('speaker annotations bind to an existing or future user turn without changing its text', () => {
+  const observed = []
+  const sync = new ConversationSync({ onRecord: (message, context) => observed.push({ message, context }) })
+  const context = { ownerId: 'owner', sessionId: 'voice' }
+  sync.annotateSpeaker({
+    ...context,
+    turnId: 'turn-before',
+    messageId: 'voice:user:turn-before',
+    speaker: { status: 'verified', speaker_id: 'xiaoming', display_name: '小明', confidence: 0.82 },
+  })
+  const before = sync.record({
+    ...context,
+    id: 'voice:user:turn-before',
+    role: 'user',
+    source: 'voice-user',
+    turnId: 'turn-before',
+    content: '第一句话',
+  })
+  const after = sync.record({
+    ...context,
+    id: 'voice:user:turn-after',
+    role: 'user',
+    source: 'voice-user',
+    turnId: 'turn-after',
+    content: '第二句话',
+  })
+  sync.annotateSpeaker({
+    ...context,
+    turnId: 'turn-after',
+    messageId: after.id,
+    speaker: { status: 'unknown', confidence: 0.31 },
+  })
+
+  assert.equal(before.speaker.speaker_id, 'xiaoming')
+  assert.equal(sync.list(context)[1].speaker.status, 'unknown')
+  assert.equal(sync.list(context)[1].speaker.speaker_id, null)
+  assert.deepEqual(sync.list(context).map(message => message.content), ['第一句话', '第二句话'])
+  assert.equal(observed.filter(item => item.context.eventType === 'speaker/annotation').length, 2)
+})

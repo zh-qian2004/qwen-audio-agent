@@ -9,9 +9,39 @@ function clean(value) {
   return String(value || '').replace(/\s+/g, ' ').trim()
 }
 
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function speakerSnapshot(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const status = ['verified', 'unknown', 'error'].includes(value.status)
+    ? value.status
+    : 'unknown'
+  const speakerId = clean(value.speaker_id).slice(0, 80) || null
+  return Object.freeze({
+    status: status === 'verified' && !speakerId ? 'unknown' : status,
+    speaker_id: speakerId,
+    display_name: clean(value.display_name).slice(0, 120) || null,
+    role: clean(value.role).slice(0, 40) || null,
+    confidence: finiteOrNull(value.confidence),
+    margin: finiteOrNull(value.margin),
+    speaker_turn_id: clean(value.speaker_turn_id).slice(0, 120) || null,
+    audio_start_sequence: finiteOrNull(value.audio_start_sequence),
+    audio_end_sequence: finiteOrNull(value.audio_end_sequence),
+    audio_ms: finiteOrNull(value.audio_ms),
+    identity_ready_ms: finiteOrNull(value.identity_ready_ms),
+    occurred_at: finiteOrNull(value.occurred_at),
+    revision: Math.max(1, Number(value.revision) || 1),
+  })
+}
+
 function recordedSnapshot(message) {
   return {
     ...message,
+    ...(message.speaker ? { speaker: { ...message.speaker } } : {}),
     taskIds: [...(message.taskIds || [])],
     inputs: (message.inputs || []).map(input => ({ ...input })),
     ...(message.citations
@@ -87,6 +117,7 @@ export class ConversationSync {
         byId: new Map(),
         lastAccessedAt: Date.now(),
         recorded: new Map(),
+        speakerByTurn: new Map(),
         recordSequence: 0,
         recordEpoch: 0,
         historyPosition: 0,
@@ -134,15 +165,21 @@ export class ConversationSync {
     createdAt = null,
     historyPosition = null,
     final = true,
+    speaker = undefined,
   }, { notify = true } = {}) {
     const normalized = clean(content)
     // Runtime sources record final text only. Do not let an accidental partial
     // create (or overwrite) a durable message or consume its history position.
     if (final === false || !id || !normalized) return null
     const state = this.state(ownerId, sessionId)
+    const resolvedSpeaker = role === 'user'
+      ? speakerSnapshot(speaker) || state.speakerByTurn.get(String(turnId || '')) || null
+      : null
     const existing = state.byId.get(id)
     if (existing) {
-      const changed = existing.role !== role || existing.content !== normalized
+      const changed = existing.role !== role
+        || existing.content !== normalized
+        || JSON.stringify(existing.speaker || null) !== JSON.stringify(resolvedSpeaker)
       Object.assign(existing, {
         role,
         content: normalized,
@@ -151,7 +188,9 @@ export class ConversationSync {
         taskId,
         taskIds: [...new Set((taskIds || []).filter(Boolean))],
         inputs: (inputs || []).map(input => ({ ...input })),
+        ...(resolvedSpeaker ? { speaker: resolvedSpeaker } : {}),
       })
+      if (!resolvedSpeaker) delete existing.speaker
       if (citations?.length) {
         existing.citations = citations.map(citation => ({ ...citation }))
       }
@@ -172,6 +211,7 @@ export class ConversationSync {
       taskId,
       taskIds: [...new Set((taskIds || []).filter(Boolean))],
       inputs: (inputs || []).map(input => ({ ...input })),
+      ...(resolvedSpeaker ? { speaker: resolvedSpeaker } : {}),
       ...(citations?.length
         ? { citations: citations.map(citation => ({ ...citation })) }
         : {}),
@@ -201,6 +241,35 @@ export class ConversationSync {
 
   record(message) {
     return this.upsert(message)
+  }
+
+  annotateSpeaker({ ownerId, sessionId, turnId, messageId, speaker } = {}) {
+    const safeTurnId = String(turnId || '').trim()
+    const annotation = speakerSnapshot(speaker)
+    if (!ownerId || !sessionId || !safeTurnId || !annotation) return null
+    const state = this.state(ownerId, sessionId)
+    const previous = state.speakerByTurn.get(safeTurnId)
+    if (previous && previous.revision > annotation.revision) return { ...previous }
+    state.speakerByTurn.set(safeTurnId, annotation)
+    const message = state.messages.find(item => (
+      item.role === 'user'
+      && (item.turnId === safeTurnId || (messageId && item.id === messageId))
+    ))
+    if (message) {
+      message.speaker = annotation
+      this.#recordPending(state, message)
+    }
+    try {
+      this.onRecord?.(null, {
+        ownerId,
+        sessionId,
+        eventType: 'speaker/annotation',
+        turnId: safeTurnId,
+        messageId: String(messageId || message?.id || `voice:user:${safeTurnId}`),
+        speaker: { ...annotation },
+      })
+    } catch { /* observers must not affect sync */ }
+    return { ...annotation }
   }
 
   #recordPending(state, message) {
@@ -269,6 +338,7 @@ export class ConversationSync {
     return (this.peek(ownerId, sessionId)?.messages || [])
       .map(message => ({
         ...message,
+        ...(message.speaker ? { speaker: { ...message.speaker } } : {}),
         inputs: (message.inputs || []).map(input => ({ ...input })),
         ...(message.citations
           ? { citations: message.citations.map(citation => ({ ...citation })) }

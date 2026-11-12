@@ -335,6 +335,9 @@ export function attachGatewayClientTransport(server, {
               // while the handler owns the actual profile content.
               sessionRuntime.setAssistantProfile(profile)
             },
+            annotateSpeaker(annotation) {
+              sessionRuntime.annotateSpeaker(annotation)
+            },
           },
         })
         connectionLogger.info('client_event.received', {

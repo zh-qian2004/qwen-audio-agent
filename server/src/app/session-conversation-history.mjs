@@ -65,6 +65,31 @@ export class SessionConversationHistory {
   }
 
   append(message, context = {}) {
+    if (context.eventType === 'speaker/annotation') {
+      if (!context.ownerId || !context.turnId || !context.speaker) return
+      const pending = this.sessionJournal.append({
+        ownerId: context.ownerId,
+        sessionId: context.sessionId || 'main',
+        event: {
+          type: 'speaker/annotation',
+          turnId: context.turnId,
+          source: 'speaker-identity',
+          payload: {
+            messageId: context.messageId || `voice:user:${context.turnId}`,
+            speaker: context.speaker,
+          },
+        },
+      })
+      pending?.catch?.(error => {
+        this.logger?.warn('conversation_history.speaker_annotation_failed', {
+          ownerId: context.ownerId,
+          sessionId: context.sessionId || 'main',
+          turnId: context.turnId,
+          error,
+        })
+      })
+      return
+    }
     if (!context.ownerId || !message?.id) return
     const pending = this.sessionJournal.append({
       ownerId: context.ownerId,
@@ -81,6 +106,7 @@ export class SessionConversationHistory {
           inputs: message.inputs || [],
           taskIds: message.taskIds || [],
           citations: message.citations || [],
+          ...(message.speaker ? { speaker: message.speaker } : {}),
         },
       },
     })

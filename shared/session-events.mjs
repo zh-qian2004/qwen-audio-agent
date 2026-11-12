@@ -13,6 +13,7 @@ export const SessionEventType = Object.freeze({
   USER_MESSAGE: 'user/message',
   ASSISTANT_CHUNK: 'assistant/chunk',
   ASSISTANT_MESSAGE: 'assistant/message',
+  SPEAKER_ANNOTATION: 'speaker/annotation',
   TOOL_CALL: 'tool/call',
   TOOL_RESULT: 'tool/result',
   ERROR: 'error',

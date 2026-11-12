@@ -121,3 +121,45 @@ test('restores durable conversation positions and does not replay acknowledged h
   await restoredRegistry.flush()
   restoredHistory.close()
 })
+
+test('persists append-only speaker annotations and restores them onto user messages', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'qwaudio-speaker-annotation-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const registry = new SessionJournalRegistry({ directory })
+  const sync = new ConversationSync()
+  const history = new SessionConversationHistory({ conversationSync: sync, sessionJournal: registry })
+  const context = { ownerId: 'owner', sessionId: 'voice' }
+  history.start()
+  sync.record({
+    ...context,
+    id: 'voice:user:turn-1',
+    role: 'user',
+    source: 'voice-user',
+    turnId: 'turn-1',
+    content: '帮我看看天气',
+  })
+  sync.annotateSpeaker({
+    ...context,
+    turnId: 'turn-1',
+    messageId: 'voice:user:turn-1',
+    speaker: {
+      status: 'verified', speaker_id: 'xiaoming', display_name: '小明', confidence: 0.83,
+    },
+  })
+  await registry.flush()
+  const records = await registry.read('owner', 'voice')
+  assert.equal(records.filter(event => event.type === 'speaker/annotation').length, 1)
+  history.close()
+
+  const restoredSync = new ConversationSync()
+  const restoredHistory = new SessionConversationHistory({
+    conversationSync: restoredSync,
+    sessionJournal: new SessionJournalRegistry({ directory }),
+  })
+  restoredHistory.start()
+  const [message] = restoredSync.list(context)
+  assert.equal(message.speaker.status, 'verified')
+  assert.equal(message.speaker.speaker_id, 'xiaoming')
+  assert.equal(message.content, '帮我看看天气')
+  restoredHistory.close()
+})

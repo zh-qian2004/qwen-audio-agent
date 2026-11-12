@@ -59,6 +59,7 @@ import {
   ClientEventDefinitionRegistry,
   GatewayEventRouter,
 } from '../client/client-event-router.mjs'
+import { speakerAnnotationDefinition } from '../client/speaker-annotation.mjs'
 
 export function createGatewayApplication({
   config = defaultConfig,
@@ -343,7 +344,7 @@ const runtimeCommands = clientCommandRuntime || new GatewayClientCommandRuntime(
 })
 const gatewayEventRouter = clientEventRouter || new GatewayEventRouter({
   registry: new ClientEventDefinitionRegistry({
-    definitions: clientEventDefinitions,
+    definitions: [speakerAnnotationDefinition(), ...clientEventDefinitions],
   }),
 })
 const publicEndpointRuntime = publicEndpoint === undefined

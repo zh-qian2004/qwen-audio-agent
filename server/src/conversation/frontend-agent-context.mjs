@@ -13,6 +13,24 @@ function clean(value) {
   return String(value || '').replace(/\s+/g, ' ').trim()
 }
 
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function speakerContextTag(message) {
+  if (message.role !== 'user' || !message.speaker) return ''
+  const speaker = message.speaker
+  const fields = [
+    `status=${JSON.stringify(clean(speaker.status) || 'unknown')}`,
+    `speaker_id=${JSON.stringify(clean(speaker.speaker_id) || null)}`,
+    `display_name=${JSON.stringify(clean(speaker.display_name) || null)}`,
+    `confidence=${JSON.stringify(finiteOrNull(speaker.confidence))}`,
+  ]
+  return `<speaker ${fields.join(' ')}>`
+}
+
 export function normalizeClientContext({
   timeZone,
   locale,
@@ -101,7 +119,8 @@ export function buildRecentConversationContext(messages = []) {
       clean(input.filename),
       clean(input.mime),
     ].filter(Boolean).join(' · ')).filter(Boolean).join('；')
-    const base = `${message.role === 'user' ? '用户' : '助手'}: ${content}`
+    const speakerTag = speakerContextTag(message)
+    const base = `${speakerTag ? `${speakerTag}\n` : ''}${message.role === 'user' ? '用户' : '助手'}: ${content}`
     const line = inputSummary
       ? `${base}（可引用输入：${inputSummary}）`
       : base

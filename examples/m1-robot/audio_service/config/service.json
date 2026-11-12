@@ -59,10 +59,27 @@
     "idle_timeout_seconds": 5,
     "max_stream_seconds": 300,
     "buffer_limit_bytes": 384000,
-    "chunk_ms": 60,
+    "chunk_ms": 120,
     "publish_lead_chunks": 2,
+    "startup_buffer_chunks": 3,
     "playback_drain_seconds": 0.4,
     "recent_events": 20
+  },
+  "echo_suppression": {
+    "enabled": true,
+    "reference_host": "127.0.0.1",
+    "reference_port": 19094,
+    "reference_delay_ms": 250,
+    "reference_search_ms": 80,
+    "reference_window_ms": 1500,
+    "correlation_threshold": 0.65,
+    "echo_attenuation_db": 15,
+    "near_end_margin_db": 6,
+    "near_end_frames": 3,
+    "near_end_hold_ms": 500,
+    "near_end_min_rms": 400,
+    "tail_ms": 250,
+    "initial_echo_gain": 0.12
   },
   "audio": {
     "sample_rate": 48000,

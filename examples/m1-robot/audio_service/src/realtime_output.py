@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import audioop
 import logging
 import struct
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -17,17 +19,25 @@ LOG = logging.getLogger(__name__)
 
 
 class Pcm24kMonoTo48kStereo:
-    """Incremental linear 2x resampler that is invariant to WebSocket chunking."""
+    """Incremental C-backed 2x resampler, invariant to WebSocket chunking.
+
+    ``audioop`` is part of the robot's pinned Python 3.10 runtime and performs
+    both resampling and channel duplication in C.  The previous per-sample
+    Python loop could monopolise the FastAPI event loop while realtime output
+    was arriving, starving ``/ws/audio/input`` and dropping the microphone
+    frames needed for barge-in.
+    """
 
     def __init__(self):
         self._byte_residual = b""
-        self._previous: Optional[int] = None
+        self._rate_state = None
+        self._last_sample: Optional[int] = None
         self.input_bytes = 0
         self.output_bytes = 0
 
     @property
     def buffered_input_bytes(self) -> int:
-        return len(self._byte_residual) + (2 if self._previous is not None else 0)
+        return len(self._byte_residual) + (2 if self._last_sample is not None else 0)
 
     def feed(self, payload: bytes) -> bytes:
         self.input_bytes += len(payload)
@@ -36,16 +46,12 @@ class Pcm24kMonoTo48kStereo:
         self._byte_residual = data[aligned:]
         if not aligned:
             return b""
-        samples = struct.unpack(f"<{aligned // 2}h", data[:aligned])
-        output = bytearray()
-        for sample in samples:
-            if self._previous is None:
-                self._previous = sample
-                continue
-            midpoint = (self._previous + sample) // 2
-            output.extend(struct.pack("<hhhh", self._previous, self._previous, midpoint, midpoint))
-            self._previous = sample
-        result = bytes(output)
+        pcm = data[:aligned]
+        self._last_sample = struct.unpack_from("<h", pcm, aligned - 2)[0]
+        resampled, self._rate_state = audioop.ratecv(
+            pcm, 2, 1, 24_000, 48_000, self._rate_state
+        )
+        result = audioop.tostereo(resampled, 2, 1, 1)
         self.output_bytes += len(result)
         return result
 
@@ -57,34 +63,52 @@ class Pcm24kMonoTo48kStereo:
                 400,
                 {"residual_bytes": len(self._byte_residual)},
             )
-        if self._previous is None:
+        if self._last_sample is None:
             return b""
-        result = struct.pack("<hhhh", self._previous, self._previous, self._previous, self._previous)
-        self._previous = None
+        # ratecv already emitted the final source sample once. Duplicate that
+        # frame once more to preserve the historical exact 2x output length.
+        result = struct.pack("<hh", self._last_sample, self._last_sample)
+        self._last_sample = None
+        self._rate_state = None
         self.output_bytes += len(result)
         return result
 
 
 class RealtimeOutputService:
-    VERSION = "1.3.0"
+    VERSION = "1.4.0"
 
-    def __init__(self, config: Dict[str, Any], publisher: Any, arbiter: PlaybackArbiter):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        publisher: Any,
+        arbiter: PlaybackArbiter,
+        echo_reference: Optional[Any] = None,
+    ):
         self.config = config or {}
         output = self.config.get("output", {})
         queue = self.config.get("queue", {})
         self.publisher = publisher
         self.arbiter = arbiter
+        self.echo_reference = echo_reference
         self.idle_timeout = max(0.1, float(output.get("idle_timeout_seconds", 5.0)))
         self.max_stream_seconds = max(0.1, float(output.get("max_stream_seconds", 300.0)))
         self.buffer_limit_bytes = max(7680, int(output.get("buffer_limit_bytes", 384000)))
         self.chunk_ms = max(5.0, float(output.get("chunk_ms", 20.0)))
         self.chunk_bytes = int(48000 * self.chunk_ms / 1000.0) * 4
         self.lead_chunks = max(0, int(output.get("publish_lead_chunks", 2)))
+        self.startup_buffer_chunks = max(
+            1,
+            int(output.get("startup_buffer_chunks", self.lead_chunks + 1)),
+        )
         self.start_timeout = max(0.1, float(output.get("start_timeout_seconds", 5.0)))
         self.drain_seconds = max(0.0, float(output.get("playback_drain_seconds", queue.get("playback_drain_seconds", 0.4))))
         self._active: Optional[Dict[str, Any]] = None
         self._active_lock = asyncio.Lock()
         self._stopping = False
+        self._publish_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="realtime-pcm-publisher",
+        )
         self._recent: deque = deque(maxlen=max(5, int(output.get("recent_events", 20))))
         self.counters = {
             "started": 0,
@@ -97,6 +121,11 @@ class RealtimeOutputService:
             "published_packets": 0,
             "published_bytes": 0,
             "backpressure_waits": 0,
+            "publish_calls": 0,
+            "publish_call_ms_total": 0.0,
+            "publish_call_ms_max": 0.0,
+            "schedule_late_events": 0,
+            "schedule_late_ms_max": 0.0,
         }
 
     async def stop(self) -> None:
@@ -106,6 +135,9 @@ class RealtimeOutputService:
             active["cancel"].set()
             async with active["buffer_condition"]:
                 active["buffer_condition"].notify_all()
+        self._publish_executor.shutdown(wait=False, cancel_futures=True)
+        if self.echo_reference is not None:
+            self.echo_reference.close()
 
     async def cancel(
         self,
@@ -314,7 +346,10 @@ class RealtimeOutputService:
                 active["received_bytes"] += len(payload)
                 self.counters["received_packets"] += 1
                 self.counters["received_bytes"] += len(payload)
-                converted = converter.feed(payload)
+                # Keep the shared FastAPI loop responsive for microphone input
+                # and cancellation even if a provider sends a very large PCM
+                # delta. Calls remain sequential, so converter state is safe.
+                converted = await asyncio.to_thread(converter.feed, payload)
                 active["converted_bytes"] += len(converted)
                 self.counters["converted_bytes"] += len(converted)
                 pending.extend(converted)
@@ -330,7 +365,7 @@ class RealtimeOutputService:
             event = self._parse_json(message["text"])
             event_type = event.get("type")
             if event_type == "audio_end":
-                converted = converter.finish()
+                converted = await asyncio.to_thread(converter.finish)
                 active["converted_bytes"] += len(converted)
                 self.counters["converted_bytes"] += len(converted)
                 pending.extend(converted)
@@ -378,12 +413,33 @@ class RealtimeOutputService:
         await queue.put(chunk)
 
     async def _play_loop(self, websocket: WebSocket, active: Dict[str, Any], queue: asyncio.Queue, lease: PlaybackLease) -> None:
-        packet_index = 0
-        media_start: Optional[float] = None
-        while True:
+        prefetched = []
+        stream_ended = False
+        while len(prefetched) < self.startup_buffer_chunks:
             chunk = await queue.get()
             if chunk is None:
+                stream_ended = True
                 break
+            prefetched.append(chunk)
+        active["startup_buffered_chunks"] = len(prefetched)
+        active["startup_buffered_ms"] = round(
+            sum(len(chunk) for chunk in prefetched) / (48000 * 4) * 1000.0,
+            1,
+        )
+
+        packet_index = 0
+        media_start: Optional[float] = None
+        reference_start_ns: Optional[int] = None
+        while True:
+            if prefetched:
+                chunk = prefetched.pop(0)
+            elif stream_ended:
+                break
+            else:
+                chunk = await queue.get()
+                if chunk is None:
+                    stream_ended = True
+                    break
             async with active["buffer_condition"]:
                 active["buffered_bytes"] = max(0, active["buffered_bytes"] - len(chunk))
                 active["buffer_condition"].notify_all()
@@ -397,7 +453,39 @@ class RealtimeOutputService:
                 return
             if active["cancel"].is_set() or lease.cancel_event.is_set():
                 return
-            self.publisher.publish_chunk(chunk)
+            schedule_late_ms = max(0.0, (time.monotonic() - target) * 1000.0)
+            active["schedule_late_ms_max"] = max(active["schedule_late_ms_max"], schedule_late_ms)
+            self.counters["schedule_late_ms_max"] = max(
+                self.counters["schedule_late_ms_max"], schedule_late_ms,
+            )
+            if packet_index > self.lead_chunks and schedule_late_ms > self.chunk_ms * 0.5:
+                active["schedule_late_events"] += 1
+                self.counters["schedule_late_events"] += 1
+            # rclpy serialisation and the cross-domain speaker bridge can block
+            # under robot load. A dedicated single-worker executor prevents
+            # PCM pacing from competing with conversion and other to_thread
+            # work while preserving publish order.
+            publish_started = time.monotonic()
+            if reference_start_ns is None:
+                reference_start_ns = time.monotonic_ns()
+                if self.echo_reference is not None:
+                    self.echo_reference.begin(active["stream_id"])
+            reference_timestamp_ns = reference_start_ns + int(
+                active["published_audio_seconds"] * 1_000_000_000
+            )
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(self._publish_executor, self.publisher.publish_chunk, chunk)
+            if self.echo_reference is not None:
+                self.echo_reference.publish_48k_stereo(chunk, reference_timestamp_ns)
+            publish_call_ms = (time.monotonic() - publish_started) * 1000.0
+            active["publish_calls"] += 1
+            active["publish_call_ms_total"] += publish_call_ms
+            active["publish_call_ms_max"] = max(active["publish_call_ms_max"], publish_call_ms)
+            self.counters["publish_calls"] += 1
+            self.counters["publish_call_ms_total"] += publish_call_ms
+            self.counters["publish_call_ms_max"] = max(
+                self.counters["publish_call_ms_max"], publish_call_ms,
+            )
             active["published_packets"] += 1
             active["published_bytes"] += len(chunk)
             active["published_audio_seconds"] += duration
@@ -422,6 +510,8 @@ class RealtimeOutputService:
             return
         active["phase"] = "ended"
         active["playback_ended_at"] = time.time()
+        if self.echo_reference is not None:
+            self.echo_reference.end(active["stream_id"])
         self.counters["completed"] += 1
         self._remember("ended", active)
         await self._send_event(websocket, "playback_ended", active)
@@ -439,6 +529,8 @@ class RealtimeOutputService:
         active["cancel_reason"] = reason
         active["cancelled_at"] = time.time()
         active["buffered_bytes"] = 0
+        if self.echo_reference is not None:
+            self.echo_reference.end(active.get("stream_id"))
         self.counters["cancelled"] += 1
         self._remember("cancelled", active)
         if send is not None:
@@ -447,7 +539,7 @@ class RealtimeOutputService:
 
     def status(self) -> Dict[str, Any]:
         active = self._public_active(self._active) if self._active is not None else None
-        return {
+        payload = {
             "active": active,
             "stream_id": active.get("stream_id") if active else None,
             "response_id": active.get("response_id") if active else None,
@@ -458,6 +550,8 @@ class RealtimeOutputService:
                 "output_topic": getattr(self.publisher, "speaker_topic", "/audio/speaker_pcm"),
                 "chunk_ms": self.chunk_ms,
                 "chunk_bytes": self.chunk_bytes,
+                "publish_lead_chunks": self.lead_chunks,
+                "startup_buffer_chunks": self.startup_buffer_chunks,
             },
             "limits": {
                 "idle_timeout_seconds": self.idle_timeout,
@@ -470,6 +564,9 @@ class RealtimeOutputService:
             "arbiter": self.arbiter.snapshot(),
             "ros": self.publisher.status(),
         }
+        if self.echo_reference is not None:
+            payload["echo_reference"] = self.echo_reference.status()
+        return payload
 
     def _parse_start(self, message: Dict[str, Any]) -> Dict[str, Any]:
         if message.get("type") == "websocket.disconnect":
@@ -523,6 +620,13 @@ class RealtimeOutputService:
             "buffered_bytes": 0,
             "buffer_peak_bytes": 0,
             "backpressure_waits": 0,
+            "startup_buffered_chunks": 0,
+            "startup_buffered_ms": 0.0,
+            "publish_calls": 0,
+            "publish_call_ms_total": 0.0,
+            "publish_call_ms_max": 0.0,
+            "schedule_late_events": 0,
+            "schedule_late_ms_max": 0.0,
             "buffer_condition": asyncio.Condition(),
             "converter_buffered_bytes": 0,
             "pending_conversion_bytes": 0,

@@ -15,6 +15,7 @@ if [[ -f "$PID_FILE" ]]; then
   OLD_PID=$(cat "$PID_FILE" 2>/dev/null || true)
   if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
     if tr '\0' ' ' < "/proc/$OLD_PID/cmdline" | grep -q "$ROOT/src/main.py"; then
+      "$ROOT/scripts/run-input.sh"
       echo "audio_service already running (PID $OLD_PID)"
       exit 0
     fi
@@ -116,6 +117,7 @@ for _ in $(seq 1 200); do
     exit 1
   fi
   if curl -fsS --max-time 1 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
+    "$ROOT/scripts/run-input.sh"
     echo "audio_service started (PID $PID), http://127.0.0.1:$PORT"
     exit 0
   fi

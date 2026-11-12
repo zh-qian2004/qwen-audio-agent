@@ -25,12 +25,18 @@ LOG = logging.getLogger(__name__)
 
 
 class AudioGateway:
-    VERSION = "1.3.0"
+    VERSION = "1.4.0"
 
-    def __init__(self, config: Dict[str, Any], runtime: Optional[Any] = None):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        runtime: Optional[Any] = None,
+        echo_suppressor: Optional[Any] = None,
+    ):
         cfg = (config or {}).get("input", {}) or {}
         self.config = cfg
         self.runtime = runtime
+        self.echo_suppressor = echo_suppressor
 
         self.topic = str(cfg.get("topic", "/audio/capture_pcm"))
         self.sample_rate = int(cfg.get("sample_rate", 16000))
@@ -116,6 +122,14 @@ class AudioGateway:
         self.capture.ingress.bind(self._loop)
         self._stopping = False
 
+        if self.echo_suppressor is not None:
+            suppressor_started = await asyncio.to_thread(self.echo_suppressor.start)
+            if not suppressor_started:
+                LOG.warning(
+                    "回声抑制参考监听未启动：%s",
+                    self.echo_suppressor.status().get("last_error"),
+                )
+
         started = await asyncio.to_thread(self.capture.start)
         self._started_at = time.time()
         self._pump_task = asyncio.create_task(self._pump_loop(), name="audio-ingress-pump")
@@ -152,6 +166,8 @@ class AudioGateway:
     async def stop(self) -> None:
         self._stopping = True
         await asyncio.to_thread(self.capture.stop)
+        if self.echo_suppressor is not None:
+            await asyncio.to_thread(self.echo_suppressor.stop)
         pump = self._pump_task
         self._pump_task = None
         if pump is not None:
@@ -193,11 +209,16 @@ class AudioGateway:
 
     def _process_input(self, raw: AudioFrame) -> None:
         now_ns = time.monotonic_ns()
-        for pcm in self.rechunker.feed(raw.pcm):
+        chunks = list(self.rechunker.feed(raw.pcm))
+        frame_ns = self.frame_ms * 1_000_000
+        for index, pcm in enumerate(chunks):
+            captured_at_ns = now_ns - max(0, len(chunks) - index - 1) * frame_ns
+            if self.echo_suppressor is not None:
+                pcm = self.echo_suppressor.process(pcm, captured_at_ns)
             self._sequence += 1
             frame = AudioFrame(
                 sequence=self._sequence,
-                captured_at_ns=now_ns,
+                captured_at_ns=captured_at_ns,
                 source_timestamp_ns=raw.source_timestamp_ns,
                 sample_rate=self.sample_rate,
                 channels=self.channels,
@@ -252,7 +273,7 @@ class AudioGateway:
         capture = self.capture.status()
         rechunker = self.rechunker.status()
         ring = self.ring.status()
-        return {
+        payload = {
             "ok": True,
             "version": self.VERSION,
             "online": capture["online"],
@@ -286,6 +307,9 @@ class AudioGateway:
             },
             "last_error": self._last_error or self._capture_error(),
         }
+        if self.echo_suppressor is not None:
+            payload["echo_suppression"] = self.echo_suppressor.status()
+        return payload
 
     def _capture_error(self) -> Optional[Dict[str, Any]]:
         status = self.capture.status()
@@ -342,7 +366,7 @@ class AudioGateway:
     def health(self) -> Dict[str, Any]:
         status = self.status()
         capture = status["capture"]
-        return {
+        payload = {
             "available": self.available,
             "online": status["online"],
             "topic": capture["topic"],
@@ -360,6 +384,9 @@ class AudioGateway:
             "output_frames": status["metrics"]["output_frames"],
             "last_error": status["last_error"],
         }
+        if self.echo_suppressor is not None:
+            payload["echo_suppression"] = self.echo_suppressor.status()
+        return payload
 
     def subscribe(self, name: str, policy: str = "latest", capacity: int = 0):
         return self.bus.subscribe(name, policy=policy, capacity=capacity or self.consumer_capacity)

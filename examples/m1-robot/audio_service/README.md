@@ -1,5 +1,9 @@
 # audio_service — M1 机器人音频与语音能力网关
 
+当前版本：`1.4.0`。实时语音链路包含播放感知型基础回声抑制：输出服务通过
+本机 UDP 向独立麦克风服务发送 16 kHz 参考帧，麦克风服务仅衰减与播放高度
+相关的回声帧；连续近端人声会在 2～3 帧内穿透，以保留全双工打断能力。
+
 `audio_service` 是独立于 Dashboard 和 Agent 的**二次开发音频与语音能力 Gateway**。
 TTS 是当前第一个落地模块，但不是本项目的全部定位；后续 ASR、TSE、VAD、说话人能力、
 音频流分发和输入输出仲裁都在同一服务边界内扩展。
@@ -867,3 +871,37 @@ Wi-Fi 状态，以及 8 个音频/扬声器启停、音量、麦克风模式服�
 实机验收脚本 `audio_service/deploy/verify-vendor-routing.py` 检查在线抑制、
 未就绪 Agent 回退、主 Harness 自动重连，以及 0.25 秒静音 PCM 输出。
 回退检查会短暂替换事件连接并请求一次厂商唤醒提示；需要在完整 ROS Python 环境下运行。
+
+## 14. 全双工输入隔离（1.3.1）
+
+实时输出的重采样改为 C 实现，并将重采样及 ROS 发布移出 FastAPI 主事件循环。
+由于机器人在播放期间的进程负载仍会影响同进程 WebSocket 调度，Agent 的麦克风流进一步
+拆分到独立进程：
+
+```text
+audio_input_service 127.0.0.1:8093 → /ws/audio/input
+audio_service       127.0.0.1:8091 → /ws/audio/output、TTS、仲裁、厂商事件
+```
+
+`scripts/run.sh` 会同时启动两个进程，`/userdata/startup.sh` 也分别检查 8091 和 8093。
+Harness 应把 `M1_AUDIO_INPUT_URL` 指向 8093；输出与取消接口继续使用 8091。
+
+`deploy/verify-full-duplex.py` 使用 12 秒静音输出压力验证麦克风连续性。验收标准为输入
+至少 40 帧/秒、`dropped_frames <= 5`、队列不超过 10、采集到发送延迟不超过 300 ms。
+
+## 15. 实时播放抗抖动（1.3.3）
+
+实时 PCM 的 ROS 发布使用独立单线程执行器，避免与重采样及其他 `to_thread` 工作争用。
+播放器在首次发布前至少积累 `output.startup_buffer_chunks` 个完整分片，并按
+`output.publish_lead_chunks` 预送。默认 120 ms 分片下为 3 包启动缓冲、2 包预送，约
+360 ms。实机上的 RELIABLE ROS 发布调用平均约 64 ms/次，120 ms 分片可避免发布耗时
+长期占满每个调度周期，同时覆盖 `media_audio` 观测到的 120–190 ms DDS 到达抖动。
+
+`GET /api/audio/status` 的 `output.stats` 与活动流新增：
+
+- `publish_call_ms_max`：单次 ROS 发布的最大耗时；
+- `schedule_late_events / schedule_late_ms_max`：发布调度迟到次数和最大值；
+- `startup_buffered_chunks / startup_buffered_ms`：本轮启动时实际积累的音频。
+
+实机验收除原有 `xruns=0`、`seq_gap=0` 外，厂商日志中的 `supply` 应接近 `1.0`，播放
+中 `silence_periods` 不应连续增长。

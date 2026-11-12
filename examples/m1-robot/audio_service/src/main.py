@@ -51,6 +51,7 @@ from pydantic import BaseModel  # noqa: E402
 
 from state import ServiceError, redact_secret  # noqa: E402
 from audio_gateway import AudioGateway  # noqa: E402
+from echo_suppression import EchoReferenceSender  # noqa: E402
 from api.audio_routes import create_audio_router  # noqa: E402
 from api.output_routes import create_output_router  # noqa: E402
 from api.vendor_event_routes import create_vendor_event_router  # noqa: E402
@@ -111,7 +112,8 @@ PUBLISHER = RosPcmPublisher(
     capture_stats=GATEWAY.capture_status,
 )
 ARBITER = PlaybackArbiter(CONFIG.get("playback", {}))
-OUTPUT = RealtimeOutputService(CONFIG, PUBLISHER, ARBITER)
+ECHO_REFERENCE = EchoReferenceSender(CONFIG.get("echo_suppression", {}))
+OUTPUT = RealtimeOutputService(CONFIG, PUBLISHER, ARBITER, echo_reference=ECHO_REFERENCE)
 MEDIA_AUDIO_BRIDGE = MediaAudioDomainBridge(CONFIG.get("media_audio_bridge", {}), RUNTIME)
 VENDOR_EVENTS = VendorEventBridge(
     CONFIG.get("vendor_events", {}),

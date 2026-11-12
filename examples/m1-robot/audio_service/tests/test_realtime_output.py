@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import struct
+import threading
 import time
 
 import pytest
@@ -77,6 +78,48 @@ def test_streaming_converter_handles_arbitrary_chunks_and_residual_state():
     assert all(frames[index] == frames[index + 1] for index in range(0, len(frames), 2))
 
 
+def test_streaming_converter_preserves_linear_interpolation_contract():
+    values = [-30000, -1, 0, 1, 29999]
+    source = struct.pack(f"<{len(values)}h", *values)
+    converter = Pcm24kMonoTo48kStereo()
+    actual = converter.feed(source) + converter.finish()
+
+    mono = []
+    for previous, current in zip(values, values[1:]):
+        mono.extend((previous, (previous + current) // 2))
+    mono.extend((values[-1], values[-1]))
+    expected = struct.pack(
+        f"<{len(mono) * 2}h",
+        *(sample for sample in mono for _channel in range(2)),
+    )
+
+    assert actual == expected
+
+
+@pytest.mark.asyncio
+async def test_large_conversion_does_not_starve_the_event_loop():
+    converter = Pcm24kMonoTo48kStereo()
+    ticks = 0
+    running = True
+
+    async def ticker():
+        nonlocal ticks
+        while running:
+            ticks += 1
+            await asyncio.sleep(0)
+
+    ticker_task = asyncio.create_task(ticker())
+    try:
+        converted = await asyncio.to_thread(converter.feed, bytes(48000 * 30))
+        converted += await asyncio.to_thread(converter.finish)
+    finally:
+        running = False
+        await ticker_task
+
+    assert len(converted) == 48000 * 30 * 4
+    assert ticks > 1
+
+
 def test_streaming_converter_rejects_incomplete_final_sample():
     converter = Pcm24kMonoTo48kStereo()
     converter.feed(b"\x01")
@@ -129,6 +172,59 @@ def test_burst_input_applies_backpressure_instead_of_overflow():
     assert events[-1]["type"] == "playback_ended"
     assert sum(publisher.packets) == 4800 * 8
     assert output.status()["stats"]["backpressure_waits"] > 0
+
+
+def test_realtime_output_prefetches_lead_and_uses_dedicated_publish_thread():
+    class TimedPublisher(FakePublisher):
+        def __init__(self):
+            super().__init__()
+            self.publish_threads = []
+            self.publish_times = []
+
+        def publish_chunk(self, chunk):
+            self.publish_threads.append(threading.current_thread().name)
+            self.publish_times.append(time.monotonic())
+            return super().publish_chunk(chunk)
+
+    config = base_config(output={
+        "chunk_ms": 20,
+        "publish_lead_chunks": 3,
+        "startup_buffer_chunks": 4,
+        "playback_drain_seconds": 0.0,
+    })
+    publisher = TimedPublisher()
+    arbiter = PlaybackArbiter(config["playback"])
+    output = RealtimeOutputService(config, publisher, arbiter)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        publisher.start()
+        try:
+            yield
+        finally:
+            await output.stop()
+            await arbiter.stop()
+            publisher.stop()
+
+    app = FastAPI(lifespan=lifespan)
+    app.include_router(create_output_router(output))
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/audio/output") as ws:
+            ws.send_json(start_event())
+            assert ws.receive_json()["type"] == "output_ready"
+            ws.send_bytes(pcm_samples(4800))
+            ws.send_json({"type": "audio_end"})
+            events = []
+            while not events or events[-1]["type"] != "playback_ended":
+                events.append(ws.receive_json())
+
+    assert len(publisher.publish_times) >= 5
+    assert publisher.publish_times[3] - publisher.publish_times[0] < 0.05
+    assert all(name.startswith("realtime-pcm-publisher") for name in publisher.publish_threads)
+    status = output.status()
+    assert status["format"]["publish_lead_chunks"] == 3
+    assert status["format"]["startup_buffer_chunks"] == 4
+    assert status["stats"]["publish_calls"] == len(publisher.publish_times)
 
 
 @pytest.mark.parametrize(

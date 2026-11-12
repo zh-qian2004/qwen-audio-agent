@@ -36,7 +36,7 @@ PHASE_LABELS = {
 
 
 class TtsService:
-    VERSION = "1.3.0"
+    VERSION = "1.4.0"
 
     def __init__(
         self,

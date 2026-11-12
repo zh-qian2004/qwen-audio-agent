@@ -5,6 +5,8 @@ set -eo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PID_FILE="$ROOT/data/audio_service.pid"
 
+"$ROOT/scripts/stop-input.sh"
+
 if [[ ! -f "$PID_FILE" ]]; then
   echo "audio_service 未运行（无 PID 文件）"
   exit 0

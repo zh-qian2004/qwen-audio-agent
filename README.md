@@ -71,6 +71,18 @@ npm run build
 
 后文把机器人地址写成 `YOUR_ROBOT_IP`，需要替换为实际 IP。首次用 `ssh root@YOUR_ROBOT_IP` 核对主机指纹并配置公钥；发布脚本使用 BatchMode，不会交互询问密码。
 
+### 2.3 首次连接：USB / ADB → SSH
+
+尚不能 SSH 登录时，先阅读 [首次连接与 SSH / USB 开发](examples/m1-robot/docs/connection-development.md)。完整流程为：
+
+1. 用数据线接入，检查 `adb devices -l`，按固件流程授权。历史设备使用 `adb shell auth`；它是厂商命令，调试密码与 SSH 登录凭据分别获取。
+2. 在授权 shell 中检查 `id`、`ip -4 addr show` 和 `ip route`，通过厂商 App/受支持流程完成 Wi-Fi 配网，确认实际可达地址。
+3. 使用局域网 SSH；无可达网络时，设备允许的情况下可用 `adb forward tcp:10022 tcp:22`，再 `ssh -p 10022 root@127.0.0.1`。USB 不一定提供虚拟网卡。
+4. 公钥保存在 `/userdata/.ssh/authorized_keys`；核对用户 home 和 `AuthorizedKeysFile`，使用可写入口或固件支持的持久化配置。软链不能绕过只读挂载，已有 `.ssh` 路径应保留。
+5. 通过独立终端验证 `BatchMode=yes` 公钥登录，再继续部署。密钥、密码与网络地址不应照抄历史设备的数据。
+
+详细文档还包含 Windows SSH 别名、USB 下 scp/发布、端口转发以及超时、认证失败、IP 变化的排查步骤。
+
 ## 3. 安装机器人服务
 
 ### 3.1 复制源码

@@ -22,8 +22,8 @@
 ssh root@192.168.137.132 'bash /userdata/developer/audio-agent/scripts/edge-service.sh status'
 ```
 
-端侧服务由 `edge-service.sh` 的 `start|status|stop` 管理；目前尚未加入机器人开机自启。切换 Agent 前应确认音频输入没有另一个 Connector 占用。Dashboard、`audio_service` 和 `vision_service` 是独立服务，Agent 发布不会覆盖或重启它们。
+以上是 2026-11-12 的部署快照。端侧服务由 `edge-service.sh` 的 `start|status|stop` 管理；是否开机自启以设备实际配置为准。切换 Agent 前应确认音频输入没有另一个 Connector 占用。Dashboard、`audio_service` 和 `vision_service` 是独立服务，Agent 发布不会覆盖或重启它们。
 
-这台机器人的发布和回退脚本目前保存在本地 `D:\projects\m1-robot\deploy\audio-agent-edge\`，其中 `sync-edge.ps1` 会校验和部署 Agent 版本；**该脚本尚未纳入本仓库**。本目录中的 `startup.sh` 和厂商补丁用于机器人服务，不是端侧 Agent 发布脚本。模型 API Key、说话人模型和登记数据保存在机器人私有目录，不随 Git 同步。
+可复用的发布、校验、启停和守护脚本现已纳入 [edge/](edge/README.md)。`sync-edge.ps1` 从仓库自身定位源码，参数指定机器人地址；不再依赖原开发者的 Windows 目录。本目录中的 `startup.sh` 和厂商补丁用于机器人服务。模型 API Key、说话人模型和登记数据保存在机器人私有目录，不随 Git 同步。
 
-较完整的部署过程、历史验证结果与本机发布命令见本地 `D:\projects\m1-robot\deploy\audio-agent-edge\README.md`。
+从零部署、实现细节与排障统一见仓库根 [README.md](../../../README.md)。
